@@ -430,7 +430,7 @@ async function viewSummary(id) {
 async function viewBrowse(id, q = '', filter = 'all') {
   STATE.current = id;
   renderSidebar();
-  const d = await api('GET', `/api/course/${id}/browse?q=${encodeURIComponent(q)}&filter=${filter}`);
+  const d = await api('GET', `/api/browse/${id}?q=${encodeURIComponent(q)}&filter=${filter}`);
   const m = $('#main');
   m.innerHTML = '';
   const cname = (STATE.courses.find((x) => x.id === id) || {}).name || '';

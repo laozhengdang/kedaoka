@@ -134,6 +134,31 @@ app.whenReady().then(async () => {
         return JSON.stringify({ term0, importanceShown: imp, answer, advanced: term0 !== term1 });
       })()`);
       log.push('键盘 3→1→空格: ' + r5);
+      // 仓库页
+      const r6 = await win.webContents.executeJavaScript(`(async () => {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        document.querySelector('#btnQuit')?.click();
+        await wait(300);
+        const id = location.hash.split('/').pop();
+        location.hash = '#/browse/' + id;
+        await wait(900);
+        const rows = document.querySelectorAll('.cardrow').length;
+        const toast = document.querySelector('#toast')?.innerText || '';
+        return JSON.stringify({ rows, toast, head: (document.body.innerText || '').slice(0, 80) });
+      })()`);
+      log.push('仓库页: ' + r6);
+      // 点一个术语看详情
+      const r7 = await win.webContents.executeJavaScript(`(async () => {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        document.querySelector('.cardrow')?.click();
+        await wait(900);
+        return JSON.stringify({
+          term: document.querySelector('.detail .term')?.innerText || 'NO_TERM',
+          bodyLen: (document.querySelector('#cardBody')?.innerText || '').length,
+          toast: document.querySelector('#toast')?.innerText || '',
+        });
+      })()`);
+      log.push('术语详情: ' + r7);
     } catch (e) {
       log.push('UI 测试出错: ' + e.message);
     }
