@@ -131,7 +131,7 @@ const handlers = {
     let sql = `SELECT c.id,c.front,c.back,c.importance,c.source_page,c.status,c.image_path,
                       COALESCE(s.state,'new') st
                FROM card c LEFT JOIN card_state s ON s.card_id=c.id
-               WHERE c.course_id=?`;
+               WHERE c.course_id=? AND c.status='active'`;
     const args = [p.id];
     if (q) { sql += ' AND (c.front LIKE ? OR c.back LIKE ?)'; args.push(`%${q}%`, `%${q}%`); }
     if (filter === 'weak') sql += " AND COALESCE(s.state,'new') IN ('learning','relearning')";
