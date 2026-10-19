@@ -99,9 +99,23 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .meta { color: var(--muted); font-size: 13px; margin-bottom: 34px; }
 .choices { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .choice { padding: 14px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); font-size: 14px; }
-.choice small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.choice small { display: block; color: inherit; opacity: .72; font-size: 11px; margin-top: 2px; }
 .choice:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 四档：整块底色区分「会 / 还行 / 危险 / 不会」 */
+.choice.r1 { background: #a9dfbe; border-color: #6cc08f; color: #0b4f2b; }
+.choice.r1:hover { background: #93d6ae; border-color: #43a86f; color: #073d21; }
+.choice.r2 { background: #aecbf7; border-color: #6f9cea; color: #0f357f; }
+.choice.r2:hover { background: #98bcf4; border-color: #4a7fdf; color: #0a2a66; }
+.choice.r3 { background: #f6d75e; border-color: #d9b22f; color: #5c3e00; }
+.choice.r3:hover { background: #f3cc40; border-color: #c49a14; color: #4a3200; }
+.choice.r4 { background: #f4a9a9; border-color: #dc7272; color: #7e0f0f; }
+.choice.r4:hover { background: #f19191; border-color: #cc5050; color: #690b0b; }
 .kbd { font-size: 10px; color: #b9b5a8; margin-left: 4px; }
+
+/* 星级：金色实心 + 很浅的空星 */
+.stars { color: #f0a300; letter-spacing: 1px; }
+.stars .dim { color: #e0d8c2; }
 .answer { text-align: left; font-family: var(--serif); font-size: 16px; line-height: 1.85; white-space: pre-wrap; }
 .answer .label { font-family: var(--sans); font-size: 12px; color: var(--muted); letter-spacing: .1em; margin-bottom: 6px; }
 

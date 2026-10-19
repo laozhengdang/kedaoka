@@ -296,12 +296,12 @@ function renderCard() {
   if (r.phase === 'ask') {
     inner.innerHTML = `
       <div class="term">${esc(c.front)}</div>
-      <div class="meta">${'★'.repeat(c.importance)}${'☆'.repeat(5 - c.importance)} · 第 ${c.source_page} 页</div>
+      <div class="meta">${stars(c.importance)} · 第 ${c.source_page} 页</div>
       <div class="choices">
-        <button class="choice" data-r="1">记得<small>以后不用再考</small><span class="kbd">1</span></button>
-        <button class="choice" data-r="2">记得<small>不用看概念</small><span class="kbd">2</span></button>
-        <button class="choice" data-r="3">模糊<small>要看概念</small><span class="kbd">3</span></button>
-        <button class="choice" data-r="4">不会<small>完全不记得</small><span class="kbd">4</span></button>
+        <button class="choice r1" data-r="1">记得<small>以后不用再考</small><span class="kbd">1</span></button>
+        <button class="choice r2" data-r="2">记得<small>不用看概念</small><span class="kbd">2</span></button>
+        <button class="choice r3" data-r="3">模糊<small>要看概念</small><span class="kbd">3</span></button>
+        <button class="choice r4" data-r="4">不会<small>完全不记得</small><span class="kbd">4</span></button>
       </div>`;
     inner.querySelectorAll('.choice').forEach((b) => {
       b.onclick = () => chooseRating(Number(b.dataset.r));
@@ -320,7 +320,7 @@ function renderCard() {
   } else {
     inner.innerHTML = `
       <div class="term">${esc(c.front)}</div>
-      <div class="meta">第 ${c.source_page} 页 · ${'★'.repeat(c.importance)}</div>
+      <div class="meta">第 ${c.source_page} 页 · ${stars(c.importance)}</div>
       <div class="answer"><div class="label">课件原文</div>${esc(c.back || '（这一页没有抽到上下文）')}</div>
       ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" alt="配图" loading="lazy"></div>` : ''}
       <div class="row" style="justify-content:center;margin-top:26px">
@@ -494,7 +494,7 @@ async function viewGraph(id) {
         const r = el('div', 'tree-child');
         r.innerHTML = `<span class="branch">${lastCh ? '  ' : '│ '}${lastPg ? '  ' : '│ '}${last ? '└' : '├'}─ </span>` +
           `<a data-go="${k.id}">${esc(k.front)}</a>` +
-          `<span class="star">${'★'.repeat(k.importance)}</span>`;
+          `<span class="star">${stars(k.importance)}</span>`;
         tree.appendChild(r);
       });
     });
@@ -556,7 +556,7 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false) {
     for (const c of groups[pg]) {
       const row = el('div', 'cardrow');
       row.innerHTML = `<span class="t">${esc(c.front)}</span>
-        <span class="star">${'★'.repeat(c.importance)}</span>
+        <span class="star">${stars(c.importance)}</span>
         <span class="pg">${c.st === 'graduated' ? '已毕业' : c.st === 'new' ? '新' : c.st}</span>`;
       row.onclick = () => { location.hash = `#/card/${c.id}`; };
       list.appendChild(row);
@@ -578,7 +578,7 @@ async function viewCard(id) {
     </div>
     <div class="detail">
       <div class="term">${esc(c.front)}</div>
-      <div class="meta">${'★'.repeat(c.importance)}${'☆'.repeat(5 - c.importance)} · 第 ${c.source_page} 页 · ${c.st}</div>
+      <div class="meta">${stars(c.importance)} · 第 ${c.source_page} 页 · ${c.st}</div>
       <div class="body" id="cardBody">${esc(c.back)}</div>
       ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" alt="配图" loading="lazy"></div>` : ''}
       ${d.samePage.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">同一页的其他概念</div>
@@ -696,6 +696,12 @@ async function doImport() {
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 星级：实心用金色，空星用很浅的金灰（不再是灰白一片）
+function stars(n) {
+  const k = Math.max(0, Math.min(5, Number(n) || 0));
+  return `<span class="stars">${'★'.repeat(k)}<span class="dim">${'☆'.repeat(5 - k)}</span></span>`;
 }
 
 // 点图放大（最小版图片查看器，完整版见文档 24.7）

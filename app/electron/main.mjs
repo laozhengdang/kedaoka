@@ -73,7 +73,7 @@ app.whenReady().then(async () => {
 
   if (UITEST) {
     win = new BrowserWindow({
-      width: 1200, height: 820, show: false,
+      width: 1200, height: 820, show: UITEST,
       webPreferences: {
         preload: join(HERE, 'preload.cjs'),
         contextIsolation: true, nodeIntegration: false,
@@ -100,6 +100,15 @@ app.whenReady().then(async () => {
         return document.querySelector('#revInner')?.innerText?.slice(0, 140) || 'EMPTY_REVIEW';
       })()`);
       log.push('复习屏: ' + (r2 || '').replace(/\\n/g, ' | '));
+      // 截一张图，留作界面证据
+      try {
+        const { writeFileSync } = await import('node:fs');
+        await new Promise((r) => setTimeout(r, 500));
+        const shot = await win.webContents.capturePage();
+        const shotPath = join(process.env.MIAOMIAO_DATA || '.', 'shot-review.png');
+        writeFileSync(shotPath, shot.toPNG());
+        log.push('截图: ' + shotPath);
+      } catch (e) { log.push('截图失败: ' + e.message); }
       // 点第 1 档，看是否换到下一张
       const r3 = await win.webContents.executeJavaScript(`(async () => {
         const before = document.querySelector('.term')?.innerText || '';
