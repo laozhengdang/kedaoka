@@ -205,6 +205,20 @@ app.whenReady().then(async () => {
         return JSON.stringify({ roots, links, firstLink, toast: document.querySelector('#toast')?.innerText || '' });
       })()`);
       log.push('关系图: ' + r9);
+      // 设置页的 AI 面板
+      const r10 = await win.webContents.executeJavaScript(`(async () => {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        location.hash = '#/settings';
+        await wait(900);
+        const panel = document.querySelector('#aiPanel')?.innerText || 'NO_PANEL';
+        return JSON.stringify({ panel: panel.replace(/\\n/g, ' | ').slice(0, 160) });
+      })()`);
+      log.push('AI 面板: ' + r10);
+      try {
+        const { writeFileSync } = await import('node:fs');
+        const shot = await win.webContents.capturePage();
+        writeFileSync(join(process.env.MIAOMIAO_DATA || '.', 'shot-settings.png'), shot.toPNG());
+      } catch { /* noop */ }
     } catch (e) {
       log.push('UI 测试出错: ' + e.message);
     }

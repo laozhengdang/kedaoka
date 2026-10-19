@@ -627,6 +627,8 @@ async function viewSettings() {
   const w = el('div', 'wrap');
   w.innerHTML = `
     <h1>设置</h1>
+    <h2>AI 接口</h2>
+    <div class="detail" id="aiPanel"></div>
     <h2>学习节奏</h2>
     <div class="detail">
       <div class="row" style="align-items:center;gap:12px">
@@ -646,32 +648,6 @@ async function viewSettings() {
     </div>
     <div class="row" style="margin-top:16px">
       <button id="pSave" class="primary">保存</button>
-    </div>
-    <h2>AI 接口（高级）</h2>
-    <div class="detail">
-      <p class="hint">接上模型之后，导入时会由 AI 读原文判断"哪些是术语"，比按颜色猜准得多。
-        推荐 DeepSeek（便宜够用）。任何 OpenAI 兼容接口都能填。</p>
-      <div class="row" style="align-items:center;gap:12px;margin-bottom:6px">
-        <label style="width:100px">接口地址</label>
-        <input id="aiBase" value="${esc(ai.baseUrl)}" placeholder="https://api.deepseek.com/v1">
-      </div>
-      <div class="row" style="align-items:center;gap:12px;margin-bottom:6px">
-        <label style="width:100px">模型</label>
-        <input id="aiModel" value="${esc(ai.model)}" placeholder="deepseek-chat">
-      </div>
-      <div class="row" style="align-items:center;gap:12px;margin-bottom:6px">
-        <label style="width:100px">API Key</label>
-        <input id="aiKey" type="password" placeholder="${ai.hasKey ? '已保存 ' + esc(ai.keyMask) + '（留空不改）' : 'sk-...'}">
-      </div>
-      <div class="row" style="align-items:center;gap:12px">
-        <label style="width:100px">每批页数</label>
-        <input id="aiPer" type="number" value="${ai.pagesPerRequest}" style="width:100px">
-      </div>
-      <div class="row" style="margin-top:12px">
-        <button id="aiSave" class="primary small">保存</button>
-        <button id="aiTest" class="small">测试连接</button>
-      </div>
-      <pre id="aiTestOut" class="log hidden"></pre>
     </div>`;
   m.appendChild(w);  $('#pSave').onclick = async () => {
     await api('POST', '/api/settings', {
@@ -688,25 +664,115 @@ async function viewSettings() {
   };
 
   // ---- AI 配置 ----
-  $('#aiSave').onclick = async () => {
+  renderAiPanel(ai);
+}
+
+// AI 接口面板：未接入 → 表单；接入中 → 进度；成功 → 明确的成功页；失败 → 原因 + 重试
+async function renderAiPanel(cfg) {
+  const box = $('#aiPanel');
+  if (!box) return;
+
+  if (cfg && cfg.hasKey && cfg.status !== 'editing') {
+    // 已接入状态（后端确认过 key 在）
+    box.innerHTML = `
+      <div class="ai-ok">
+        <div class="ai-ok-icon">✓</div>
+        <div>
+          <div class="ai-ok-title">已经接入 AI</div>
+          <div class="sub">${esc(cfg.model)} · ${esc(cfg.baseUrl)} · 密钥 ${esc(cfg.keyMask || '已保存')}</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button id="aiRecheck" class="primary small">再测一次</button>
+        <button id="aiEdit" class="small">修改配置</button>
+        <button id="aiGoCourse" class="ghost small">去选一门课试试 ›</button>
+      </div>
+      <pre id="aiTestOut" class="log hidden"></pre>`;
+    $('#aiRecheck').onclick = () => runAiTest(cfg);
+    $('#aiEdit').onclick = () => renderAiPanel({ ...cfg, hasKey: cfg.hasKey, status: 'editing' });
+    $('#aiGoCourse').onclick = () => { location.hash = '#/'; };
+    return;
+  }
+
+  box.innerHTML = `
+    <p class="hint">接上模型之后，导入/整理时会由 AI 读原文判断"哪些是术语"，比按颜色猜准得多。
+      推荐 DeepSeek（便宜够用）。任何 OpenAI 兼容接口都能填。</p>
+    <div class="row" style="align-items:center;gap:12px;margin-bottom:6px">
+      <label style="width:100px">接口地址</label>
+      <input id="aiBase" value="${esc(cfg?.baseUrl || 'https://api.deepseek.com/v1')}" placeholder="https://api.deepseek.com/v1">
+    </div>
+    <div class="row" style="align-items:center;gap:12px;margin-bottom:6px">
+      <label style="width:100px">模型</label>
+      <input id="aiModel" value="${esc(cfg?.model || 'deepseek-chat')}" placeholder="deepseek-chat">
+    </div>
+    <div class="row" style="align-items:center;gap:12px;margin-bottom:6px">
+      <label style="width:100px">API Key</label>
+      <input id="aiKey" type="password" placeholder="${cfg?.hasKey ? '已保存 ' + esc(cfg.keyMask) + '（留空不改）' : 'sk-... 粘贴到这里'}">
+    </div>
+    <div class="row" style="align-items:center;gap:12px">
+      <label style="width:100px">每批页数</label>
+      <input id="aiPer" type="number" value="${cfg?.pagesPerRequest || 3}" style="width:100px">
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button id="aiSaveTest" class="primary">保存并测试连接</button>
+      <button id="aiCancel" class="ghost small">取消</button>
+    </div>
+    <div id="aiStatus" class="ai-status hidden"></div>`;
+
+  if (cfg?.status === 'editing') {
+    $('#aiCancel').onclick = async () => renderAiPanel(await api('GET', '/api/ai/config'));
+  } else {
+    $('#aiCancel').onclick = () => { location.hash = '#/'; };
+  }
+
+  $('#aiSaveTest').onclick = async () => {
+    const btn = $('#aiSaveTest');
+    const st = $('#aiStatus');
     const key = $('#aiKey').value.trim();
-    const body = { baseUrl: $('#aiBase').value.trim(), model: $('#aiModel').value.trim(), pagesPerRequest: Number($('#aiPer').value) || 3 };
-    if (key) body.apiKey = key;
-    const r = await api('POST', '/api/ai/config', body);
-    toast(r.hasKey ? 'AI 配置已保存' : '已保存（还没有 Key）');
-    $('#aiKey').value = '';
-  };
-  $('#aiTest').onclick = async () => {
-    const out = $('#aiTestOut');
-    out.classList.remove('hidden');
-    out.textContent = '测试中…';
+    if (!key && !cfg?.hasKey) {
+      st.className = 'ai-status bad';
+      st.textContent = '请先粘贴 API Key（形如 sk-...）';
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = '正在连接…';
+    st.className = 'ai-status';
+    st.textContent = '正在保存并连接，请稍候（约 2 秒）…';
     try {
+      const body = {
+        baseUrl: $('#aiBase').value.trim(),
+        model: $('#aiModel').value.trim(),
+        pagesPerRequest: Number($('#aiPer').value) || 3,
+      };
+      if (key) body.apiKey = key;
+      const saved = await api('POST', '/api/ai/config', body);
       const r = await api('POST', '/api/ai/test', {});
-      out.textContent = `连接成功\n模型：${r.model}\n地址：${r.baseUrl}\n返回：${r.sample}`;
+      st.className = 'ai-status good';
+      st.innerHTML = `连接成功：${esc(r.model)} · ${esc(r.baseUrl)}`;
+      await new Promise((res) => setTimeout(res, 600));
+      renderAiPanel({ ...saved, status: 'ok' });
+      toast('AI 已接入 ✓');
     } catch (e) {
-      out.textContent = '失败：' + (e.message || e);
+      btn.disabled = false;
+      btn.textContent = '保存并测试连接';
+      st.className = 'ai-status bad';
+      st.innerHTML = `连接失败：${esc(e.message || String(e))}
+        <br><span class="sub">常见原因：Key 复制不全 / Key 没余额 / 接口地址或模型名写错。</span>`;
     }
   };
+}
+
+async function runAiTest(cfg) {
+  const out = $('#aiTestOut');
+  if (out) { out.classList.remove('hidden'); out.textContent = '测试中…'; }
+  try {
+    const r = await api('POST', '/api/ai/test', {});
+    if (out) out.textContent = `连接正常\n模型：${r.model}\n地址：${r.baseUrl}\n返回：${r.sample}`;
+    toast('连接正常 ✓');
+  } catch (e) {
+    if (out) out.textContent = '连接失败：' + (e.message || e);
+    toast('连接失败');
+  }
 }
 
 // ---------------- AI 精修 ----------------

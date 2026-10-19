@@ -166,6 +166,22 @@ textarea { min-height: 120px; font-family: var(--serif); }
 
 .empty { color: var(--muted); text-align: center; padding: 60px 0; }
 
+/* ---------- AI 接口面板 ---------- */
+.ai-ok {
+  display: flex; align-items: center; gap: 16px;
+  background: #eaf6ee; border: 1px solid #b6ddc4; border-radius: 12px;
+  padding: 18px 20px;
+}
+.ai-ok-icon {
+  width: 44px; height: 44px; flex: 0 0 44px; border-radius: 50%;
+  background: #2f9e5a; color: #fff; font-size: 24px; line-height: 44px; text-align: center;
+}
+.ai-ok-title { font-family: var(--serif); font-size: 18px; color: #14532d; margin-bottom: 2px; }
+
+.ai-status { margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px; }
+.ai-status.good { background: #eaf6ee; border: 1px solid #b6ddc4; color: #14532d; }
+.ai-status.bad { background: #fdeceb; border: 1px solid #f0bdb9; color: #8f1d15; }
+
 /* ---------- 过渡动画 ---------- */
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes riseIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
