@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS page (
   file_id TEXT NOT NULL,
   page_no INTEGER NOT NULL,
   text TEXT NOT NULL,
-  has_formula INTEGER NOT NULL DEFAULT 0
+  has_formula INTEGER NOT NULL DEFAULT 0,
+  chapter TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_page_file ON page(file_id, page_no);
 
@@ -81,6 +82,7 @@ CREATE TABLE IF NOT EXISTS card (
   importance INTEGER NOT NULL DEFAULT 3,
   origin TEXT NOT NULL DEFAULT 'ppt',
   status TEXT NOT NULL DEFAULT 'active',
+  is_title INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_card_course ON card(course_id);

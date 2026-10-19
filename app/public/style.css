@@ -151,3 +151,22 @@ textarea { min-height: 120px; font-family: var(--serif); }
 .toast.show { opacity: .92; }
 
 .empty { color: var(--muted); text-align: center; padding: 60px 0; }
+
+/* ---------- 关系图（纯文字树） ---------- */
+.tree {
+  margin-top: 18px; padding: 20px 22px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 14px; line-height: 2;
+  overflow-x: auto;
+}
+.tree .branch { color: #b9b5a8; white-space: pre; }
+.tree .node { font-family: var(--serif); }
+.tree a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted rgba(0,51,153,.35); cursor: pointer; }
+.tree a:hover { border-bottom-style: solid; }
+.tree .title { font-weight: 600; font-size: 15px; }
+.tree .pg { color: var(--muted); font-size: 11px; margin-left: 8px; }
+.tree .star { color: #c9a227; font-size: 11px; margin-left: 6px; }
+.tree-child { padding-left: 0; }
+.tree-root { margin-top: 10px; }
+.tree-root:first-child { margin-top: 0; }

@@ -184,6 +184,18 @@ app.whenReady().then(async () => {
         return JSON.stringify({ img: 'NO_CARD_WITH_IMAGE' });
       })()`);
       log.push('配图: ' + r8);
+      // 关系图页
+      const r9 = await win.webContents.executeJavaScript(`(async () => {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        const courses = (await window.nativeApi.invoke('GET', '/api/bootstrap')).courses;
+        location.hash = '#/graph/' + courses[0].id;
+        await wait(900);
+        const roots = document.querySelectorAll('.tree-root').length;
+        const links = document.querySelectorAll('.tree a').length;
+        const firstLink = document.querySelector('.tree a')?.innerText || '';
+        return JSON.stringify({ roots, links, firstLink, toast: document.querySelector('#toast')?.innerText || '' });
+      })()`);
+      log.push('关系图: ' + r9);
     } catch (e) {
       log.push('UI 测试出错: ' + e.message);
     }

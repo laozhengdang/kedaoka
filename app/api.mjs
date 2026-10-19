@@ -54,7 +54,7 @@ export function ensureQueue(courseId) {
   const all = db.prepare(`
     SELECT c.id, c.importance, COALESCE(s.state,'new') st, s.due_at
     FROM card c LEFT JOIN card_state s ON s.card_id=c.id
-    WHERE c.course_id=? AND c.status='active'`).all(courseId);
+    WHERE c.course_id=? AND c.status='active' AND c.is_title=0`).all(courseId);
 
   const now = nowIso();
   const fresh = all.filter((c) => c.st === 'new' || c.st === 'learning')
@@ -193,6 +193,41 @@ const handlers = {
   },
 
   'GET /api/courses': () => db.prepare('SELECT * FROM course ORDER BY created_at').all(),
+
+  // 关系图：章 → 页 → 术语（章节名从"第一节/第二章"这类行识别，真实结构，不猜）
+  'GET /api/graph/:id': (p) => {
+    const rows = db.prepare(`
+      SELECT c.id, c.front, c.importance, c.source_page, c.is_title, p.chapter
+      FROM card c
+      LEFT JOIN page p ON p.page_no = c.source_page
+        AND p.file_id IN (SELECT id FROM source_file WHERE course_id = c.course_id)
+      WHERE c.course_id = ? AND c.status = 'active'
+      ORDER BY c.source_page, c.importance DESC`).all(p.id);
+
+    const chapters = [];
+    const byName = new Map();
+    for (const r of rows) {
+      // 认不出章节就按每 10 页一组，保证任何课件都能成树
+      let name = r.chapter;
+      if (!name) {
+        const start = Math.floor((r.source_page - 1) / 10) * 10 + 1;
+        name = `第 ${start}–${start + 9} 页`;
+      }
+      let ch = byName.get(name);
+      if (!ch) { ch = { name, pages: [], count: 0 }; byName.set(name, ch); chapters.push(ch); }
+      let pg = ch.pages.find((x) => x.page === r.source_page);
+      if (!pg) { pg = { page: r.source_page, cards: [] }; ch.pages.push(pg); }
+      pg.cards.push({ id: r.id, front: r.front, importance: r.importance, is_title: r.is_title });
+      ch.count += 1;
+    }
+    const edges = db.prepare(`
+      SELECT cf.id AS from_id, cf.front AS from_front, ct.id AS to_id, ct.front AS to_front, r.kind
+      FROM relation r
+      JOIN concept a ON a.id=r.from_concept JOIN card cf ON cf.concept_id=a.id
+      JOIN concept b ON b.id=r.to_concept JOIN card ct ON ct.concept_id=b.id
+      WHERE r.course_id=?`).all(p.id);
+    return { chapters, edges, totalCards: rows.length };
+  },
 };
 
 export function callApi(method, rawPath, body = {}) {

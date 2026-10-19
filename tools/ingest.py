@@ -60,6 +60,38 @@ def uid(p=""):
     return p + uuid.uuid4().hex[:8]
 
 
+def pick_main_term(page):
+    """这一页的标题：页面**上部**、且字号接近本页最大字的那一行。
+
+    两道过滤（都是为了别把正文小字当标题）：
+      1) 只在页面上 45% 区域找
+      2) 字号 >= 本页最大字号 × 0.9
+    """
+    top_limit = page.rect.height * 0.45
+    cands = []
+    max_size = 0
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type", 0) != 0:
+            continue
+        for line in block.get("lines", []):
+            y = line.get("bbox", [0, 0, 0, 0])[1]
+            for s in line.get("spans", []):
+                t = norm(s.get("text", ""))
+                if not looks_like_term(t):
+                    continue
+                size = s.get("size", 0)
+                max_size = max(max_size, size)
+                cands.append((size, y, t, y <= top_limit))
+    if not cands:
+        return None
+    pool = [c for c in cands if c[0] >= max_size * 0.9]
+    top = [c for c in pool if c[3]]
+    pool = top or pool
+    # 字号最大，其次最靠上
+    pool.sort(key=lambda c: (-c[0], c[1]))
+    return pool[0][2]
+
+
 # ---------------- 图片抽取 ----------------
 MIN_IMG_AREA_RATIO = 0.04   # 小于整页 4% 的多半是校徽/图标
 MIN_IMG_SIDE = 120          # 宽或高小于 120px 的丢掉
@@ -126,9 +158,10 @@ def looks_like_term(s: str) -> bool:
         return False
     if s.endswith(BAD_SUFFIX):
         return False
-    if re.fullmatch(r"[0-9０-９.．%]+", s):
+    # 带标点的多半是句子片段，不是术语
+    if any(ch in s for ch in "、，,：:；;。()（）【】[]/／"):
         return False
-    if s.count("。") or s.count("，") > 1:
+    if re.fullmatch(r"[0-9０-９.．%]+", s):
         return False
     return True
 
@@ -236,6 +269,74 @@ def clean_page_text(lines):
     return "\n".join(out)
 
 
+REL_KEYS = ("包括", "分为", "可分", "有以下", "主要有", "种类有", "可分为", "分成", "又分")
+
+
+def build_relations(conn, course_id, page_cache, page_main_term):
+    """从"X 包括 A、B、C"这类句式抽包含关系。
+
+    上位概念不用猜——直接用这一页的"主术语"（字号最大的红字），
+    因为课件里这种列举句几乎都出现在"该页主题"下面。
+    """
+    pairs = conn.execute(
+        "SELECT t.text, c.id FROM term t JOIN concept c ON c.id=t.concept_id "
+        "WHERE c.course_id=? AND t.kind='preferred'", (course_id,)
+    ).fetchall()
+    term2concept = {t: cid for t, cid in pairs}
+    if not term2concept:
+        return 0
+
+    existing = set()
+    added = 0
+    for pno, lines in page_cache.items():
+        parent = page_main_term.get(pno)
+        if not parent or parent not in term2concept:
+            continue
+        joined = "".join(ln["text"] for ln in lines)
+        parent_c = term2concept[parent]
+        for kw in REL_KEYS:
+            start = 0
+            while True:
+                pos = joined.find(kw, start)
+                if pos < 0:
+                    break
+                start = pos + len(kw)
+                seg = joined[start:start + 90]
+                seg = re.split(r"[。；;]", seg)[0]
+                kids = [norm(x) for x in re.split(r"[、，,\s]+", seg)]
+                kids = [k for k in kids if k in term2concept and k != parent]
+                if len(kids) < 2:
+                    continue
+                for k in kids[:8]:
+                    key = (parent_c, term2concept[k])
+                    if key in existing:
+                        continue
+                    existing.add(key)
+                    conn.execute(
+                        "INSERT INTO relation(course_id,from_concept,to_concept,kind) VALUES(?,?,?,?)",
+                        (course_id, key[0], key[1], "contains"),
+                    )
+                    added += 1
+    return added
+
+
+CHAPTER_RE = re.compile(r"^第\s*[一二三四五六七八九十0-9]+\s*[节章][\s、.．:：]*")
+
+
+def detect_chapter(lines):
+    """从这页的文字里找"第一节 / 第二章"这样的行，返回章节标题（去掉编号）"""
+    for ln in lines:
+        t = ln["text"].strip()
+        m = CHAPTER_RE.match(t)
+        if m:
+            rest = norm(t[m.end():])
+            rest = re.split(r"[（(]", rest)[0]
+            rest = norm(rest)
+            if 2 <= len(rest) <= 20:
+                return rest
+    return None
+
+
 def ensure_course(conn, name, profession):
     row = conn.execute("SELECT id FROM course WHERE name=?", (name,)).fetchone()
     if row:
@@ -296,6 +397,9 @@ def main():
     img_dir.mkdir(parents=True, exist_ok=True)
     page_cache = {}
     page_images = {}   # page_no -> 最像内容的那张图（相对路径）
+    page_main_term = {}  # page_no -> 这一页的"主术语"（字号最大的红字）
+    page_chapter = {}    # page_no -> 所属章节名
+    current_chapter = None
     for pno in range(len(doc)):
         page = doc[pno]
         lines = page_lines(page)
@@ -303,9 +407,15 @@ def main():
         imgs = extract_page_images(doc, page, img_dir, course_id, pno + 1)
         if imgs:
             page_images[pno + 1] = imgs[0][0]
+        page_main_term[pno + 1] = pick_main_term(page)
+        ch = detect_chapter(lines)
+        if ch:
+            current_chapter = ch
+        page_chapter[pno + 1] = current_chapter
         conn.execute(
-            "INSERT INTO page(file_id,page_no,text,has_formula) VALUES(?,?,?,?)",
-            (fid, pno + 1, clean_page_text(lines), 1 if any(ln["color"] in BLUES for ln in lines) else 0),
+            "INSERT INTO page(file_id,page_no,text,has_formula,chapter) VALUES(?,?,?,?,?)",
+            (fid, pno + 1, clean_page_text(lines), 1 if any(ln["color"] in BLUES for ln in lines) else 0,
+             current_chapter),
         )
 
     # 2) 抽红字术语（跨页聚合）
@@ -317,6 +427,14 @@ def main():
             if color in STRONG:
                 d["color"] = color
     doc.close()
+
+    # 2.5) 把"页标题"也当成概念收进来——它们是"包括/分为"的上位概念
+    for pno, t in page_main_term.items():
+        if not t or t in found:
+            continue
+        if not looks_like_term(t):
+            continue
+        found[t] = {"pages": {pno}, "color": 0x000000, "first_page": pno, "is_title": True}
 
     # 3) 概念 + 卡片
     created = 0
@@ -341,14 +459,19 @@ def main():
 
         card_id = uid("card_")
         img = page_images.get(first)
+        is_title = 1 if info.get("is_title") else 0
         conn.execute(
             "INSERT INTO card(id,course_id,concept_id,front,back,image_path,source_page,source_text,"
-            "importance,origin,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-            (card_id, course_id, concept_id, term, back, img, first, back, star, "ppt", "active", now()),
+            "importance,origin,status,is_title,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (card_id, course_id, concept_id, term, back, img, first, back,
+             4 if is_title else star, "ppt", "active", is_title, now()),
         )
         conn.execute("INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?)",
                      (card_id, "new", now()))
         created += 1
+
+    # 4) 关系：从"X 包括/分为 A、B、C"这类句式抽包含关系
+    rel_count = build_relations(conn, course_id, page_cache, page_main_term)
 
     conn.commit()
     total = conn.execute("SELECT COUNT(*) FROM card WHERE course_id=?", (course_id,)).fetchone()[0]

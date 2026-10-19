@@ -104,6 +104,7 @@ async function route() {
   const parts = h.replace(/^#\//, '').split('/');
   if (parts[0] === 'course' && parts[1]) return viewCourse(parts[1]);
   if (parts[0] === 'browse' && parts[1]) return viewBrowse(parts[1]);
+  if (parts[0] === 'graph' && parts[1]) return viewGraph(parts[1]);
   if (parts[0] === 'card' && parts[1]) return viewCard(parts[1]);
   if (parts[0] === 'summary' && parts[1]) return viewSummary(parts[1]);
   if (parts[0] === 'settings') return viewSettings();
@@ -162,6 +163,7 @@ async function viewCourse(id) {
     <div class="tabs">
       <div class="tab active" data-t="today">今天</div>
       <div class="tab" data-t="repo">仓库</div>
+      <div class="tab" data-t="graph">关系图</div>
     </div>
     <div id="tabBody"></div>`;
   m.appendChild(w);
@@ -169,6 +171,7 @@ async function viewCourse(id) {
   w.querySelectorAll('.tab').forEach((t) => {
     t.onclick = () => {
       if (t.dataset.t === 'repo') location.hash = `#/browse/${id}`;
+      if (t.dataset.t === 'graph') location.hash = `#/graph/${id}`;
     };
   });
 
@@ -438,6 +441,71 @@ async function viewSummary(id) {
   row.append(b1, b2);
   w.appendChild(row);
   m.appendChild(w);
+}
+
+// ---------------- 关系图 ----------------
+async function viewGraph(id) {
+  STATE.current = id;
+  renderSidebar();
+  const d = await api('GET', `/api/graph/${id}`);
+  const cname = (STATE.courses.find((x) => x.id === id) || {}).name || '';
+  const m = $('#main');
+  m.innerHTML = '';
+  const w = el('div', 'wrap');
+  w.innerHTML = `
+    <h1>${esc(cname)} · 关系图</h1>
+    <div class="tabs">
+      <div class="tab" data-t="today">今天</div>
+      <div class="tab" data-t="repo">仓库</div>
+      <div class="tab active">关系图</div>
+    </div>
+    <p class="sub">按课件的真实章节结构生成。点任意名词跳到它的卡片。</p>
+    <div class="tree" id="tree"></div>
+    <h2>包含关系</h2>
+    <div id="edges"></div>`;
+  m.appendChild(w);
+
+  w.querySelector('[data-t="today"]').onclick = () => { location.hash = `#/course/${id}`; };
+  w.querySelector('[data-t="repo"]').onclick = () => { location.hash = `#/browse/${id}`; };
+
+  const tree = w.querySelector('#tree');
+  const chapters = d.chapters || [];
+  chapters.forEach((ch, ci) => {
+    const lastCh = ci === chapters.length - 1;
+    const head = el('div', 'tree-root');
+    head.innerHTML = `<span class="branch">${lastCh ? '└' : '├'}─ </span><span class="node title">${esc(ch.name)}</span><span class="pg">${ch.count} 项</span>`;
+    tree.appendChild(head);
+    ch.pages.forEach((pg, pi) => {
+      const lastPg = pi === ch.pages.length - 1;
+      const p = el('div', 'tree-child');
+      p.innerHTML = `<span class="branch">${lastCh ? '  ' : '│ '}${lastPg ? '└' : '├'}─ </span><span class="pg">p${pg.page}</span>`;
+      tree.appendChild(p);
+      pg.cards.forEach((k, ki) => {
+        const last = ki === pg.cards.length - 1;
+        const r = el('div', 'tree-child');
+        r.innerHTML = `<span class="branch">${lastCh ? '  ' : '│ '}${lastPg ? '  ' : '│ '}${last ? '└' : '├'}─ </span>` +
+          `<a data-go="${k.id}">${esc(k.front)}</a>` +
+          `<span class="star">${'★'.repeat(k.importance)}</span>`;
+        tree.appendChild(r);
+      });
+    });
+  });
+  if (!chapters.length) tree.appendChild(el('div', 'empty', '还没有可以成树的内容'));
+
+  const edges = w.querySelector('#edges');
+  if (!(d.edges || []).length) {
+    edges.appendChild(el('div', 'sub', '暂未抽到（接上 AI 后这里会变成完整的概念关系网）'));
+  } else {
+    for (const e of d.edges) {
+      const r = el('div', 'tree-child');
+      r.innerHTML = `<a data-go="${e.from_id}">${esc(e.from_front)}</a> ──包含──▶ <a data-go="${e.to_id}">${esc(e.to_front)}</a>`;
+      edges.appendChild(r);
+    }
+  }
+
+  w.querySelectorAll('[data-go]').forEach((a) => {
+    a.onclick = () => { location.hash = `#/card/${a.dataset.go}`; };
+  });
 }
 
 // ---------------- 仓库 ----------------
