@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>老郑荡的妙妙小工具</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">妙妙小工具</div>
+    <div class="courses" id="courseList"></div>
+    <div class="side-foot">
+      <button id="btnImport" class="ghost">＋ 导入课件</button>
+      <button id="btnSettings" class="ghost">设置</button>
+      <button id="btnCollapse" class="ghost" title="收起侧栏">«</button>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<!-- 导入面板 -->
+<div id="importModal" class="modal hidden">
+  <div class="modal-box">
+    <h3>导入课件</h3>
+    <p class="hint">本地路径（PDF）。解析不需要 API，纯本地跑。</p>
+    <input id="importPath" placeholder="C:\...\课件.pdf">
+    <input id="importCourse" placeholder="课程名，例如 免疫学">
+    <div class="row">
+      <button id="importGo" class="primary">开始导入</button>
+      <button id="importClose" class="ghost">关闭</button>
+    </div>
+    <pre id="importLog" class="log"></pre>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
