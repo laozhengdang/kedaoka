@@ -60,6 +60,45 @@ def uid(p=""):
     return p + uuid.uuid4().hex[:8]
 
 
+# ---------------- 图片抽取 ----------------
+MIN_IMG_AREA_RATIO = 0.04   # 小于整页 4% 的多半是校徽/图标
+MIN_IMG_SIDE = 120          # 宽或高小于 120px 的丢掉
+
+
+def extract_page_images(doc, page, out_dir: Path, course_id: str, page_no: int):
+    """把这一页上"像内容"的图存下来，返回 [(相对路径, 面积)]，按面积从大到小"""
+    saved = []
+    page_area = page.rect.width * page.rect.height
+    for idx, img in enumerate(page.get_images(full=True)):
+        xref = img[0]
+        try:
+            rects = page.get_image_rects(xref)
+        except Exception:
+            rects = []
+        if not rects:
+            continue
+        area = max(r.width * r.height for r in rects)
+        if page_area <= 0 or area / page_area < MIN_IMG_AREA_RATIO:
+            continue
+        try:
+            info = doc.extract_image(xref)
+        except Exception:
+            continue
+        w, h = info.get("width", 0), info.get("height", 0)
+        if w < MIN_IMG_SIDE or h < MIN_IMG_SIDE:
+            continue
+        ext = info.get("ext", "png")
+        if ext not in ("png", "jpeg", "jpg", "webp"):
+            continue
+        name = f"p{page_no:03d}_{idx}.{ext}"
+        target = out_dir / name
+        if not target.exists():
+            target.write_bytes(info["image"])
+        saved.append((f"images/{course_id}/{name}", area))
+    saved.sort(key=lambda x: -x[1])
+    return saved
+
+
 def norm(s: str) -> str:
     s = re.sub(r"\s+", "", s or "")
     # 去掉「1.」「2、」「（3）」这类序号
@@ -252,12 +291,18 @@ def main():
         (fid, course_id, str(path), sha, len(doc), now()),
     )
 
-    # 1) 存页
+    # 1) 存页 + 抽图
+    img_dir = DATA_DIR / "images" / course_id
+    img_dir.mkdir(parents=True, exist_ok=True)
     page_cache = {}
+    page_images = {}   # page_no -> 最像内容的那张图（相对路径）
     for pno in range(len(doc)):
         page = doc[pno]
         lines = page_lines(page)
         page_cache[pno + 1] = lines
+        imgs = extract_page_images(doc, page, img_dir, course_id, pno + 1)
+        if imgs:
+            page_images[pno + 1] = imgs[0][0]
         conn.execute(
             "INSERT INTO page(file_id,page_no,text,has_formula) VALUES(?,?,?,?)",
             (fid, pno + 1, clean_page_text(lines), 1 if any(ln["color"] in BLUES for ln in lines) else 0),
@@ -295,10 +340,11 @@ def main():
         star = max(1, min(5, star))
 
         card_id = uid("card_")
+        img = page_images.get(first)
         conn.execute(
-            "INSERT INTO card(id,course_id,concept_id,front,back,source_page,source_text,"
-            "importance,origin,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-            (card_id, course_id, concept_id, term, back, first, back, star, "ppt", "active", now()),
+            "INSERT INTO card(id,course_id,concept_id,front,back,image_path,source_page,source_text,"
+            "importance,origin,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (card_id, course_id, concept_id, term, back, img, first, back, star, "ppt", "active", now()),
         )
         conn.execute("INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?)",
                      (card_id, "new", now()))
@@ -308,6 +354,7 @@ def main():
     total = conn.execute("SELECT COUNT(*) FROM card WHERE course_id=?", (course_id,)).fetchone()[0]
     report = {
         "ok": True, "file": str(path), "pages": len(page_cache),
+        "images": len(page_images),
         "terms_found": len(found), "cards_created": created,
         "course_id": course_id, "cards_total_in_course": total,
         "sample": [{"term": t, "pages": sorted(v["pages"]), "color": f"#{v['color']:06x}"}

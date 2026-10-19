@@ -56,6 +56,9 @@ ipcMain.handle('open-external', async (_e, url) => {
   if (/^https?:\/\//.test(url)) await shell.openExternal(url);
 });
 
+// 把库里的相对图片路径变成能直接放进 <img src> 的 file:// 地址
+ipcMain.handle('data-dir', async () => process.env.MIAOMIAO_DATA || '.');
+
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
 
@@ -159,6 +162,28 @@ app.whenReady().then(async () => {
         });
       })()`);
       log.push('术语详情: ' + r7);
+      // 配图：找一张有图的卡，看 <img> 有没有真的加载出来
+      const r8 = await win.webContents.executeJavaScript(`(async () => {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        const { callApi } = {};
+        const courses = (await window.nativeApi.invoke('GET', '/api/bootstrap')).courses;
+        for (const c of courses) {
+          const b = await window.nativeApi.invoke('GET', '/api/browse/' + c.id);
+          const withImg = b.cards.find(x => x.image_path);
+          if (!withImg) continue;
+          location.hash = '#/card/' + withImg.id;
+          await wait(900);
+          const img = document.querySelector('.cardimg img');
+          if (!img) return JSON.stringify({ found: withImg.front, img: 'NO_IMG_TAG' });
+          await wait(400);
+          return JSON.stringify({
+            found: withImg.front, src: img.src.slice(-40),
+            loaded: img.complete && img.naturalWidth > 0, w: img.naturalWidth,
+          });
+        }
+        return JSON.stringify({ img: 'NO_CARD_WITH_IMAGE' });
+      })()`);
+      log.push('配图: ' + r8);
     } catch (e) {
       log.push('UI 测试出错: ' + e.message);
     }

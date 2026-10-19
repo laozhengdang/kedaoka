@@ -4,5 +4,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('nativeApi', {
   invoke: (method, path, body) => ipcRenderer.invoke('api', { method, path, body }),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  dataDir: () => ipcRenderer.invoke('data-dir'),
   isDesktop: true,
 });

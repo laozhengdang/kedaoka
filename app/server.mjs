@@ -9,6 +9,7 @@ import { callApi, startImport, getJob } from './api.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, 'public');
+const DATA_DIR = process.env.MIAOMIAO_DATA || join(HERE, '..', 'data');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -50,6 +51,19 @@ const server = createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(500, { 'content-type': MIME['.json'] });
       return res.end(JSON.stringify({ error: String((e && e.message) || e) }));
+    }
+  }
+
+  // 图片：网页模式下从 data 目录读
+  if (path.startsWith('/img/')) {
+    const rel = decodeURIComponent(path.slice('/img/'.length));
+    const file = normalize(join(DATA_DIR, 'images', rel));
+    if (!file.startsWith(join(DATA_DIR, 'images'))) { res.writeHead(403); return res.end('forbidden'); }
+    try {
+      res.writeHead(200, { 'content-type': MIME[extname(file)] || 'image/png' });
+      return res.end(await readFile(file));
+    } catch {
+      res.writeHead(404); return res.end('404');
     }
   }
 

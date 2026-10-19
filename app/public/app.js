@@ -70,9 +70,22 @@ async function boot() {
   const b = await api('GET', '/api/bootstrap');
   STATE.profile = b.profile;
   STATE.courses = b.courses;
+  if (window.nativeApi && window.nativeApi.dataDir) {
+    STATE.dataDir = await window.nativeApi.dataDir();
+  }
   renderSidebar();
   bindChrome();
   route();
+}
+
+// 图片地址：桌面版拼 file://，网页版走 /img/
+function imgUrl(rel) {
+  if (!rel) return '';
+  if (STATE.dataDir) {
+    const p = (STATE.dataDir + '/' + rel).replace(/\\/g, '/');
+    return 'file:///' + p.split('/').map(encodeURIComponent).join('/');
+  }
+  return '/img/' + rel.split('/').map(encodeURIComponent).join('/');
 }
 
 function bindChrome() {
@@ -306,6 +319,7 @@ function renderCard() {
       <div class="term">${esc(c.front)}</div>
       <div class="meta">第 ${c.source_page} 页 · ${'★'.repeat(c.importance)}</div>
       <div class="answer"><div class="label">课件原文</div>${esc(c.back || '（这一页没有抽到上下文）')}</div>
+      ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" alt="配图" loading="lazy"></div>` : ''}
       <div class="row" style="justify-content:center;margin-top:26px">
         <button class="primary" id="btnNext">下一张 <span class="kbd">空格</span></button>
       </div>`;
@@ -487,6 +501,7 @@ async function viewCard(id) {
       <div class="term">${esc(c.front)}</div>
       <div class="meta">${'★'.repeat(c.importance)}${'☆'.repeat(5 - c.importance)} · 第 ${c.source_page} 页 · ${c.st}</div>
       <div class="body" id="cardBody">${esc(c.back)}</div>
+      ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" alt="配图" loading="lazy"></div>` : ''}
       ${d.samePage.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">同一页的其他概念</div>
         ${d.samePage.map((x) => `<a data-go="${x.id}">${esc(x.front)}</a>`).join(' · ')}</div>` : ''}
       ${d.relations.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">相关概念</div>
@@ -603,6 +618,13 @@ async function doImport() {
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+// 点图放大（最小版图片查看器，完整版见文档 24.7）
+document.addEventListener('click', (e) => {
+  if (e.target.tagName === 'IMG' && e.target.closest('.cardimg')) {
+    e.target.classList.toggle('zoomed');
+  }
+});
 function debounce(fn, ms) {
   let t;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
