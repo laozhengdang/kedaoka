@@ -17,6 +17,7 @@ export function getAiConfig() {
     model: p.ai_model || 'deepseek-chat',
     apiKey: p.ai_api_key || '',
     pagesPerRequest: Number(p.ai_pages_per_request) || 3,
+    review: p.ai_review !== false,
   };
 }
 
@@ -177,7 +178,54 @@ function mockReply(messages) {
   return JSON.stringify({ terms, relations: [] });
 }
 
-// ---------------- 精修一门课 ----------------
+// ---------------- 复核（第二道工序） ----------------
+// 抽取是"宁多勿漏"的初筛，复核是"把它当考试判卷"：
+// 逐条判断是不是专业术语、要不要留、名字该叫什么。
+const REVIEW_SYSTEM = `你是动物医学专业的出题老师，正在审核一份"复习术语清单"。
+清单是一段课件里的候选词。请逐条判断：这个词是不是**值得学生背的专业术语**。
+
+判为"留"（keep=true）的标准：
+- 是一个专业概念、细胞、器官、物质、机制、疾病、病变、指标，学生考试要会用；
+- 名字是个名词，不是句子片段。
+
+判为"删"（keep=false）的标准（命中任意一条就删）：
+- 章节/小节标题："第一章""第二节""主要内容""本章要点""实验目的""思考题""小结"
+- 表格的列名或行名："抗酸强度""起效时间""持续时间""收敛作用""常用抗酸药作用比较"
+- 动作/操作名："抗血清的分离与保存""单抗的类及亚类鉴定""多抗的纯化与标记"
+- 句子碎片、半截词："为克隆""简称""称为""建立""局限性""可继""见病症"
+- 泛指词："药物""作用""方法""特点""分类""用途""不良反应"这种放到任何一章都成立的
+- 明显是书名、文件名、人名、页眉页脚
+
+另外给 canonical：如果这个词是错字/多字/少字（例如"为克隆"应为"克隆"），给出正确写法；
+本来就对就填原词。
+
+只输出 JSON：
+{"verdicts":[{"name":"原词","canonical":"规范写法","keep":true,"reason":"不超过15字的理由"}]}`;
+
+async function reviewTerms(cfg, terms, chunks) {
+  if (!terms.length) return terms;
+  const pageBits = chunks.map((c) => `【第 ${c.page_no ?? c.page} 页】${String(c.text || '').slice(0, 500)}`).join('\n');
+  const list = terms.map((t, i) => `${i + 1}. ${t.name}`).join('\n');
+  const { text } = await chat(cfg, [
+    { role: 'system', content: REVIEW_SYSTEM },
+    { role: 'user', content: `候选词：\n${list}\n\n它们出自这些页：\n${pageBits}\n\n请输出 JSON。` },
+  ], { maxTokens: 1500, temperature: 0 });
+  const parsed = parseJson(text);
+  if (!parsed || !Array.isArray(parsed.verdicts)) return terms;   // 复核失败就退回初筛结果
+  const byName = new Map();
+  for (const v of parsed.verdicts) byName.set(normalizeName(v.name), v);
+  const out = [];
+  const dropped = [];
+  for (const t of terms) {
+    const v = byName.get(normalizeName(t.name));
+    if (!v) { out.push(t); continue; }               // 没判到的保留（保守）
+    if (v.keep === false) { dropped.push(`${t.name}（${v.reason || '复核删除'}）`); continue; }
+    const canon = normalizeName(v.canonical || '');
+    out.push({ ...t, name: canon && canon !== normalizeName(t.name) ? canon : t.name,
+      aliases: [...(t.aliases || []), ...(canon && canon !== normalizeName(t.name) ? [t.name] : [])] });
+  }
+  return { kept: out, dropped };
+}
 const refineJobs = new Map();
 
 export function getRefineJob(id) {
@@ -230,14 +278,29 @@ async function runRefine(courseId, job) {
     }
     if (!parsed) { job.log.push('  这一批丢弃'); job.done += chunk.length; continue; }
 
-    applyTerms(courseId, parsed, chunk, job);
+    let terms = parsed.terms || [];
+    // 第二道工序：让 AI 自己审一遍（章节标题、表头、动作名、半截词都在这被刷掉）
+    if (cfg.review !== false && terms.length) {
+      const rev = await reviewTerms(cfg, terms, chunk);
+      if (Array.isArray(rev)) {
+        terms = rev;
+      } else {
+        terms = rev.kept;
+        if (rev.dropped.length) {
+          job.log.push(`  复核删掉 ${rev.dropped.length} 条：${rev.dropped.slice(0, 5).join('；')}`);
+        }
+        job.dropped = (job.dropped || 0) + rev.dropped.length;
+      }
+    }
+    applyTerms(courseId, { ...parsed, terms }, chunk, job);
     job.done += chunk.length;
-    job.log.push(`  得到 ${(parsed.terms || []).length} 个术语`);
+    job.log.push(`  留下 ${terms.length} 个术语`);
   }
 
   job.status = 'done';
   const archived = cleanupHeadings(courseId);
   if (archived) job.log.push(`顺手藏起了 ${archived} 个"章节标题"式的假词条`);
+  if (job.dropped) job.log.push(`复核一共刷掉 ${job.dropped} 个不是术语的候选`);
   // AI 已经把术语表重建过一遍，旧的"按颜色猜"卡片就退场（归档，不删）
   const oldPpt = db.prepare(
     "SELECT COUNT(*) n FROM card WHERE course_id=? AND origin='ppt' AND status='active'").get(courseId).n;
