@@ -15,6 +15,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import uuid
@@ -24,7 +25,8 @@ from pathlib import Path
 import pymupdf
 
 ROOT = Path(__file__).resolve().parent.parent
-DB = ROOT / "data" / "db" / "app.db"
+DATA_DIR = Path(os.environ.get("MIAOMIAO_DATA") or (ROOT / "data"))
+DB = DATA_DIR / "db" / "app.db"
 REPORT = ROOT / "_probe" / "ingest_report.json"
 
 REDS = {0xFF0000, 0xC00000, 0xFF3300, 0xE00000, 0xD00000}

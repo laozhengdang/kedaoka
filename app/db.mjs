@@ -7,7 +7,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-export const DB_PATH = join(HERE, '..', 'data', 'db', 'app.db');
+// 数据目录：打包后可被 MIAOMIAO_DATA 指到 exe 旁边；开发时在仓库的 data/
+const DATA_DIR = process.env.MIAOMIAO_DATA || join(HERE, '..', 'data');
+export const DB_PATH = join(DATA_DIR, 'db', 'app.db');
 
 mkdirSync(dirname(DB_PATH), { recursive: true });
 

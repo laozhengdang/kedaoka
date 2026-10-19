@@ -15,6 +15,14 @@ __pycache__/
 .venv/
 venv/
 
+# ── Node / 打包产物 ───────────────────────────────
+node_modules/
+build/
+dist/
+out/
+*.exe
+*.log
+
 # ── 编辑器 / 系统 ─────────────────────────────────
 .vscode/
 .idea/

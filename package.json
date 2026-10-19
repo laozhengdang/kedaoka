@@ -1,0 +1,16 @@
+{
+  "name": "miaomiao-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "老郑荡的妙妙小工具 —— 兽医课程复习桌面工具",
+  "main": "app/electron/main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "web": "node app/server.mjs",
+    "smoke": "electron . --smoke"
+  },
+  "devDependencies": {
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3"
+  }
+}

@@ -12,6 +12,12 @@ let STATE = { profile: null, courses: [], current: null, queue: null };
 let REVIEW = null;
 
 async function api(method, path, body) {
+  // 桌面版：走 Electron IPC；网页版：走本地 HTTP
+  if (window.nativeApi && window.nativeApi.invoke) {
+    const out = await window.nativeApi.invoke(method, path, body);
+    if (out && out.error) throw new Error(out.error);
+    return out;
+  }
   const r = await fetch(path, {
     method,
     headers: body ? { 'content-type': 'application/json' } : undefined,
@@ -248,6 +254,7 @@ function tick() {
 
 function renderCard() {
   const r = REVIEW;
+  if (!r || !r.cards) return;
   const c = r.cards[r.i];
   if (!c) return finishReview();
   const inner = $('#revInner');
