@@ -6,6 +6,8 @@ _probe/png/
 _probe/*.json
 _probe/chem_*.txt
 _probe/chem_*.png
+_probe/crops/
+_probe/latex_render.png
 
 # ── Python ────────────────────────────────────────
 __pycache__/
