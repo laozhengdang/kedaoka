@@ -152,6 +152,39 @@ textarea { min-height: 120px; font-family: var(--serif); }
 
 .empty { color: var(--muted); text-align: center; padding: 60px 0; }
 
+/* ---------- 过渡动画 ---------- */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes riseIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* 页面切换：主区域内容淡入上浮 */
+.wrap { animation: fadeUp .22s ease both; }
+/* 搜索时局部重绘，不要每次都播入场动画 */
+.wrap.no-anim { animation: none; }
+
+/* 复习屏：整屏淡入 */
+#review { animation: fadeIn .16s ease both; }
+
+/* 换卡时：术语先到，四个选项从下往上依次升起 */
+.rev-inner.enter .term { animation: fadeUp .26s ease both; }
+.rev-inner.enter .meta { animation: fadeUp .26s ease both; animation-delay: .04s; }
+.rev-inner.enter .answer { animation: fadeUp .3s ease both; animation-delay: .04s; }
+.rev-inner.enter .cardimg { animation: fadeIn .32s ease both; animation-delay: .1s; }
+.rev-inner.enter .choices .choice { animation: riseIn .34s cubic-bezier(.2, .7, .3, 1) both; }
+.rev-inner.enter .choices .choice:nth-child(1) { animation-delay: .05s; }
+.rev-inner.enter .choices .choice:nth-child(2) { animation-delay: .1s; }
+.rev-inner.enter .choices .choice:nth-child(3) { animation-delay: .15s; }
+.rev-inner.enter .choices .choice:nth-child(4) { animation-delay: .2s; }
+
+/* 侧栏按钮与悬停更柔和 */
+.course, .tab, button, .choice { transition: background .16s ease, color .16s ease, border-color .16s ease, transform .16s ease; }
+.course.active { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* 系统设置里关掉动画时，尊重用户选择 */
+@media (prefers-reduced-motion: reduce) {
+  .wrap, #review, .rev-inner.enter *, .course, .tab, button, .choice { animation: none !important; transition: none !important; }
+}
+
 /* ---------- 关系图（纯文字树） ---------- */
 .tree {
   margin-top: 18px; padding: 20px 22px;

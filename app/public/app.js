@@ -328,6 +328,15 @@ function renderCard() {
       </div>`;
     $('#btnNext').onclick = nextCard;
   }
+  playEnter(inner);
+}
+
+// 每次重画内容都重新触发一次入场动画（先摘掉 class，强制回流，再戴上）
+function playEnter(node) {
+  if (!node) return;
+  node.classList.remove('enter');
+  void node.offsetWidth;
+  node.classList.add('enter');
 }
 
 function chooseRating(rating, auto = false) {
@@ -509,14 +518,14 @@ async function viewGraph(id) {
 }
 
 // ---------------- 仓库 ----------------
-async function viewBrowse(id, q = '', filter = 'all') {
+async function viewBrowse(id, q = '', filter = 'all', silent = false) {
   STATE.current = id;
   renderSidebar();
   const d = await api('GET', `/api/browse/${id}?q=${encodeURIComponent(q)}&filter=${filter}`);
   const m = $('#main');
   m.innerHTML = '';
   const cname = (STATE.courses.find((x) => x.id === id) || {}).name || '';
-  const w = el('div', 'wrap');
+  const w = el('div', 'wrap' + (silent ? ' no-anim' : ''));
   w.innerHTML = `
     <h1>${esc(cname)}</h1>
     <div class="tabs">
@@ -533,7 +542,9 @@ async function viewBrowse(id, q = '', filter = 'all') {
     <div id="list"></div>`;
   m.appendChild(w);
   w.querySelector('[data-t="today"]').onclick = () => { location.hash = `#/course/${id}`; };
-  w.querySelector('#q').oninput = debounce((e) => viewBrowse(id, e.target.value, filter), 220);
+  const qEl = w.querySelector('#q');
+  qEl.oninput = debounce((e) => viewBrowse(id, e.target.value, filter, true), 220);
+  if (silent) { qEl.focus(); const n = qEl.value.length; qEl.setSelectionRange(n, n); }
   w.querySelectorAll('[data-f]').forEach((b) => {
     b.onclick = () => viewBrowse(id, q, b.dataset.f);
   });
