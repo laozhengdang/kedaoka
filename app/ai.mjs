@@ -99,24 +99,39 @@ export async function testConnection() {
 }
 
 // ---------------- 提示词 ----------------
-const SYSTEM = `你是中国农业大学动物医学专业的助教，负责把课件原文整理成复习卡片。
-只输出 JSON，不要任何解释或 Markdown 代码块。
+const SYSTEM = `你是中国农业大学动物医学专业的助教，负责把课件原文整理成"能考"的复习卡片。
+只输出 JSON，不要解释，不要 Markdown 代码块。
 
-对给定的课件原文，抽取真正的"专业术语"，规则：
-1. 只抽术语，不要章节标题（如"第一章""第一节""主要内容""本类药物的种类""实验目的"）、不要整句话、不要药名后面跟的剂量数字。
-2. 术语名必须是原文里**完整出现**的词，不能多字也不能少字（例如原文是"克隆"就不要写成"为克隆"）。
-3. 去掉序号、项目符号、括号里的英文；纯英文缩写可保留。
-4. 每个术语给：
-   - name: 规范名称
-   - type: entity（细胞/器官/物质）| process（机制/过程）| disease | lesion | attribute（数值/分类/性质）
-   - definition: 1~2 句中文，尽量用原文措辞，不超过 80 字；原文没讲清就写"（课件未详述）"
-   - importance: 1~5 的整数，按"老师强调程度"（红色/加粗/反复出现/在考点清单里 → 高）
-   - aliases: 原文出现的别名、英文名、缩写，数组
-5. relations: 如果这一页明确写了"A 包括 B、C"或"A 导致 B"或"A 分为 B/C"，输出 {from, to, kind}，
-   kind 只能是 contains | prerequisite | contrast | ordered_steps。没有就空数组。
-6. 宁可少抽，不要凑数。抽不准的不要。
+【抽什么】
+只抽"考试会问到的名词性概念"：术语、细胞、器官、物质、机制/过程名、疾病、病变、指标。
+每页最多抽 5 个，宁缺毋滥。
 
-输出：
+【绝对不要抽】
+- 章节标题："第一章""第一节""主要内容""本章要点""实验目的""思考题"
+- 用途/步骤/方法类的组合短语，例如"抗原物质的鉴别、定位、分析和提纯""抗血清的分离与保存""多抗的纯化与标记"
+- 带顿号或逗号的拼接列表（术语名里不允许出现"、"或"，"）
+- 整句话、带数字剂量的药名、页码、人名
+
+【名字要求】
+必须是原文里**完整出现**的词，不能多字也不能少字：原文是"克隆"就不能写成"为克隆"。
+去掉序号、项目符号、括号里的英文；纯英文缩写可以保留。
+
+【定义要求】
+- 1~2 句中文，用原文措辞，不超过 80 字。
+- **原文这一页没讲清它的含义，就不要抽这个术语**（不是让你写"课件未详述"，而是直接不抽）。
+- 定义里不要出现"本页讲了""如图所示"这类空话。
+
+【字段】
+name, type（entity|process|disease|lesion|attribute）, definition, importance（1~5 整数）,
+aliases（原文出现的别名/英文/缩写，数组）, page（页码）
+
+importance 判断标准：老师标红/加粗、反复出现、出现在考点清单、是本章核心概念 → 4~5；
+一般性名词 → 3；只在举例里提一句 → 1~2。
+
+【关系】
+只有原文明确写了"A 包括/分为 B、C"或"A 导致 B"才输出，kind 只能是
+contains | prerequisite | contrast | ordered_steps。没有就空数组。
+
 {"terms":[{"name":"","type":"","definition":"","importance":3,"aliases":[],"page":1}],
  "relations":[{"from":"","to":"","kind":"contains"}]}`;
 
@@ -185,6 +200,11 @@ async function runRefine(courseId, job) {
   const cfg = getAiConfig();
   if (cfg.baseUrl !== 'mock' && !cfg.apiKey) throw new Error('还没配置 API Key，先去设置里填');
 
+  // 重新整理 = 先把上一次 AI 产出的卡归档，避免新旧混在一起
+  const old = db.prepare("SELECT COUNT(*) n FROM card WHERE course_id=? AND origin='ai' AND status='active'").get(courseId).n;
+  db.prepare("UPDATE card SET status='archived' WHERE course_id=? AND origin='ai' AND status='active'").run(courseId);
+  if (old) job.log.push(`先把上次的 ${old} 张 AI 卡归档，重新来过`);
+
   const pages = db.prepare(`
     SELECT p.page_no, p.text FROM page p
     JOIN source_file f ON f.id = p.file_id
@@ -218,6 +238,11 @@ async function runRefine(courseId, job) {
   job.status = 'done';
   const archived = cleanupHeadings(courseId);
   if (archived) job.log.push(`顺手藏起了 ${archived} 个"章节标题"式的假词条`);
+  // AI 已经把术语表重建过一遍，旧的"按颜色猜"卡片就退场（归档，不删）
+  const oldPpt = db.prepare(
+    "SELECT COUNT(*) n FROM card WHERE course_id=? AND origin='ppt' AND status='active'").get(courseId).n;
+  db.prepare("UPDATE card SET status='archived' WHERE course_id=? AND origin='ppt' AND status='active'").run(courseId);
+  if (oldPpt) job.log.push(`旧的规则卡片 ${oldPpt} 张已归档（AI 版更准）`);
   job.log.push(`完成：新增 ${job.created} 张卡，更新 ${job.updated} 张`);
 }
 
@@ -243,34 +268,56 @@ function normalizeName(s) {
     .trim();
 }
 
+// 这条术语像不像"能考的名词"——不像就丢掉，宁可漏抽也不塞垃圾
+const BAD_NAME_RE = /[、，,；;\/／()（）]|^(方法|步骤|过程|主要|用于|包括|分为)/;
+// "抗血清的鉴定 / 单抗的类及亚类鉴定 / 分离与保存"这类是操作名，不是概念
+const ACTION_TAIL_RE = /(的?)(鉴定|分离|纯化|保存|制备|应用|检测|分类|比较|分析|提纯)$/;
+const BAD_DEF_RE = /未详述|本页|如图|见上|同上/;
+
+function acceptTerm(t) {
+  const name = normalizeName(t.name);
+  if (!name) return null;
+  if (name.length < 2 || name.length > 12) return null;
+  if (name.length > 10 && /[\u4e00-\u9fff]/.test(name)) return null;
+  if (BAD_NAME_RE.test(name)) return null;
+  if (HEAD_RE.test(name)) return null;
+  if (ACTION_TAIL_RE.test(name)) return null;
+  const def = String(t.definition || '').trim();
+  if (def.length < 6 || BAD_DEF_RE.test(def)) return null;
+  // 定义不能只是"X 的鉴定包括…"这种复述，那等于没解释
+  if (/^(该|本)?术语?/.test(def)) return null;
+  const imp = Number(t.importance) || 3;
+  if (imp < 3) return null;          // 低价值的直接不进复习
+  return { name, def, imp, type: t.type || 'unknown', aliases: t.aliases || [] };
+}
+
 function applyTerms(courseId, parsed, chunk, job) {
   const pageOf = new Map();
   for (const c of chunk) pageOf.set(c.page_no, c.text);
   const firstPage = chunk[0].page_no;
 
-  for (const t of parsed.terms || []) {
-    const name = normalizeName(t.name);
-    if (!name || name.length < 2 || name.length > 30) continue;
-    // 明显是章节标题的就跳过
-    if (/^第[一二三四五六七八九十0-9]+[章节]/.test(name)) continue;
+  for (const raw of parsed.terms || []) {
+    const ok = acceptTerm(raw);
+    if (!ok) continue;
+    const { name, def, imp, type, aliases } = ok;
+    const page = Number(raw.page) || firstPage;
 
-    const page = Number(t.page) || firstPage;
     const exists = db.prepare(
-      'SELECT id, concept_id FROM card WHERE course_id=? AND front=?').get(courseId, name);
+      'SELECT id FROM card WHERE course_id=? AND front=?').get(courseId, name);
     if (exists) {
-      db.prepare(`UPDATE card SET back=?, importance=?, origin='ai' WHERE id=?`)
-        .run(t.definition || '', Number(t.importance) || 3, exists.id);
+      db.prepare(`UPDATE card SET back=?, importance=?, origin='ai', status='active' WHERE id=?`)
+        .run(def, imp, exists.id);
       job.updated += 1;
       continue;
     }
     const conceptId = uid('cp_');
     db.prepare('INSERT INTO concept(id,course_id,type,created_at) VALUES(?,?,?,?)')
-      .run(conceptId, courseId, t.type || 'unknown', nowIso());
+      .run(conceptId, courseId, type, nowIso());
     db.prepare('INSERT INTO term(concept_id,text,kind,origin) VALUES(?,?,?,?)')
       .run(conceptId, name, 'preferred', 'ai');
-    for (const a of t.aliases || []) {
+    for (const a of aliases) {
       const al = normalizeName(a);
-      if (al && al !== name) {
+      if (al && al !== name && al.length >= 2 && al.length <= 30) {
         db.prepare('INSERT INTO term(concept_id,text,kind,origin) VALUES(?,?,?,?)')
           .run(conceptId, al, 'alt', 'ai');
       }
@@ -278,8 +325,7 @@ function applyTerms(courseId, parsed, chunk, job) {
     const cardId = uid('card_');
     db.prepare(`INSERT INTO card(id,course_id,concept_id,front,back,image_path,source_page,source_text,
       importance,origin,status,is_title,created_at) VALUES(?,?,?,?,?,NULL,?,?,?,'ai','active',0,?)`)
-      .run(cardId, courseId, conceptId, name, t.definition || '', page, t.definition || '',
-        Number(t.importance) || 3, nowIso());
+      .run(cardId, courseId, conceptId, name, def, page, def, imp, nowIso());
     db.prepare('INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?)')
       .run(cardId, 'new', nowIso());
     job.created += 1;
