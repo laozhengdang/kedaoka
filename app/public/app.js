@@ -34,8 +34,15 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(t._h);
-  t._h = setTimeout(() => t.classList.remove('show'), 1600);
+  t._h = setTimeout(() => t.classList.remove('show'), 2600);
 }
+
+// 任何没被 catch 的错误都要看得见，不许再"静默失败"
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = (e.reason && (e.reason.message || e.reason)) || '未知错误';
+  toast('出错了：' + msg);
+  console.error('[unhandled]', e.reason);
+});
 
 // ---------------- 侧栏 ----------------
 function renderSidebar() {
@@ -79,7 +86,7 @@ function bindChrome() {
 }
 
 async function route() {
-  closeReview();
+  endReview();
   const h = location.hash || '#/';
   const parts = h.replace(/^#\//, '').split('/');
   if (parts[0] === 'course' && parts[1]) return viewCourse(parts[1]);
@@ -191,7 +198,10 @@ async function viewCourse(id) {
 // ---------------- 复习 ----------------
 async function startReview(courseId) {
   const d = await api('GET', `/api/course/${courseId}`);
-  const cards = d.queue.cards.filter((c) => !c.done);
+  // 队列接口返回的是 card_id，这里统一成 id，避免下面到处写两种名字
+  const cards = d.queue.cards
+    .filter((c) => !c.done)
+    .map((c) => ({ ...c, id: c.card_id }));
   if (!cards.length) { location.hash = `#/summary/${courseId}`; return; }
   REVIEW = {
     courseId, cards, i: 0, phase: 'ask', rating: null,
@@ -201,7 +211,7 @@ async function startReview(courseId) {
 }
 
 function openReview() {
-  closeReview();
+  teardownReview();
   const box = el('div');
   box.id = 'review';
   box.innerHTML = `
@@ -217,20 +227,26 @@ function openReview() {
     <div class="rev-body"><div class="rev-inner" id="revInner"></div></div>
     <div class="rev-foot">
       <span>1–4 选档 · 空格下一张 · Esc 退出</span>
-      <span id="revHint">${STATE.profile.theme_accent ? '' : ''}</span>
+      <span id="revHint"></span>
     </div>`;
   document.body.appendChild(box);
-  $('#btnQuit').onclick = () => { closeReview(); route(); };
+  $('#btnQuit').onclick = () => { endReview(); route(); };
   $('#btnBrokenText').onclick = () => markBroken('text');
   $('#btnBrokenImg').onclick = () => markBroken('image');
   renderCard();
   REVIEW.timer = setInterval(tick, 250);
 }
 
-function closeReview() {
+// 只拆 DOM 和计时器，不动 REVIEW（openReview 里要用）
+function teardownReview() {
   if (REVIEW && REVIEW.timer) clearInterval(REVIEW.timer);
   const old = $('#review');
   if (old) old.remove();
+}
+
+// 真正结束一次复习
+function endReview() {
+  teardownReview();
   REVIEW = null;
 }
 
@@ -355,7 +371,7 @@ async function markBroken(kind) {
 
 async function finishReview() {
   const courseId = REVIEW.courseId;
-  closeReview();
+  endReview();
   toast('今天刷完了');
   location.hash = `#/summary/${courseId}`;
 }
@@ -363,7 +379,7 @@ async function finishReview() {
 // 键盘
 window.addEventListener('keydown', (e) => {
   if (!REVIEW) return;
-  if (e.key === 'Escape') { closeReview(); route(); return; }
+  if (e.key === 'Escape') { endReview(); route(); return; }
   if (REVIEW.phase === 'ask' && ['1', '2', '3', '4'].includes(e.key)) {
     chooseRating(Number(e.key));
   } else if (REVIEW.phase === 'answer' && (e.key === ' ' || e.key === 'Enter')) {

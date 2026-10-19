@@ -17,6 +17,8 @@ if (!process.env.MIAOMIAO_DATA) {
 
 // 冒烟测试：electron . --smoke 时只跑一遍 API 然后退出（不需要显示器）
 const SMOKE = process.argv.includes('--smoke');
+// UI 测试：真的点进复习屏，读 DOM，确认卡片渲染出来了
+const UITEST = process.argv.includes('--uitest');
 
 let win = null;
 
@@ -62,6 +64,68 @@ app.whenReady().then(async () => {
     const b = callApi('GET', '/api/bootstrap');
     console.log('[smoke] courses:', b.courses.map((c) => `${c.name}(${c.cards}卡)`).join(', '));
     console.log('[smoke] node', process.versions.node, 'electron', process.versions.electron);
+    app.quit();
+    return;
+  }
+
+  if (UITEST) {
+    win = new BrowserWindow({
+      width: 1200, height: 820, show: false,
+      webPreferences: {
+        preload: join(HERE, 'preload.cjs'),
+        contextIsolation: true, nodeIntegration: false,
+      },
+    });
+    await win.loadFile(join(PUBLIC, 'index.html'));
+    const log = [];
+    try {
+      const sidebar = await win.webContents.executeJavaScript(
+        'document.querySelectorAll(".course").length');
+      log.push(`课程条数: ${sidebar}`);
+      const r1 = await win.webContents.executeJavaScript(`(async () => {
+        document.querySelector('.course').click();
+        await new Promise(r => setTimeout(r, 700));
+        return (document.body.innerText || '').slice(0, 160);
+      })()`);
+      log.push('课程页文本: ' + r1.replace(/\\n/g, ' | '));
+      const r2 = await win.webContents.executeJavaScript(`(async () => {
+        const btn = [...document.querySelectorAll('button')]
+          .find(b => /开始今天的|继续|看结算/.test(b.textContent));
+        if (!btn) return 'NO_BUTTON';
+        btn.click();
+        await new Promise(r => setTimeout(r, 900));
+        return document.querySelector('#revInner')?.innerText?.slice(0, 140) || 'EMPTY_REVIEW';
+      })()`);
+      log.push('复习屏: ' + (r2 || '').replace(/\\n/g, ' | '));
+      // 点第 1 档，看是否换到下一张
+      const r3 = await win.webContents.executeJavaScript(`(async () => {
+        const before = document.querySelector('.term')?.innerText || '';
+        const btn = document.querySelector('.choice[data-r="1"]');
+        if (!btn) return 'NO_CHOICE_BTN';
+        btn.click();
+        await new Promise(r => setTimeout(r, 1200));
+        const after = document.querySelector('.term')?.innerText || 'NO_TERM';
+        return JSON.stringify({ before, after, same: before === after });
+      })()`);
+      log.push('点①后: ' + r3);
+      // 直接测一次 IPC，把真实错误暴露出来
+      const r4 = await win.webContents.executeJavaScript(`(async () => {
+        try {
+          const d = await window.nativeApi.invoke('GET', '/api/course/' + location.hash.split('/').pop());
+          const card = d.queue.cards.find(c => !c.done);
+          const out = await window.nativeApi.invoke('POST', '/api/review', { cardId: card.card_id, rating: 1, latencyMs: 1, auto: 0 });
+          return 'IPC_OK ' + JSON.stringify(out).slice(0, 120);
+        } catch (e) { return 'IPC_ERR ' + (e && (e.message || e)); }
+      })()`);
+      log.push('IPC 直连: ' + r4);
+    } catch (e) {
+      log.push('UI 测试出错: ' + e.message);
+    }
+    console.log('[uitest]\n' + log.join('\n'));
+    try {
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync(join(process.env.MIAOMIAO_DATA || '.', 'uitest.log'), log.join('\n'), 'utf8');
+    } catch (e) { console.log('[uitest] 写日志失败', e.message); }
     app.quit();
     return;
   }
