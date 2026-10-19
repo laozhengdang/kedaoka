@@ -118,6 +118,22 @@ app.whenReady().then(async () => {
         } catch (e) { return 'IPC_ERR ' + (e && (e.message || e)); }
       })()`);
       log.push('IPC 直连: ' + r4);
+      // 键盘流：3 -> 重点题 -> 1 -> 答案
+      const r5 = await win.webContents.executeJavaScript(`(async () => {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms));
+        const term0 = document.querySelector('.term')?.innerText || '';
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '3' }));
+        await wait(400);
+        const imp = document.body.innerText.includes('这是重点吗');
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' }));
+        await wait(600);
+        const answer = document.querySelector('.answer')?.innerText?.slice(0, 40) || 'NO_ANSWER';
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
+        await wait(500);
+        const term1 = document.querySelector('.term')?.innerText || '';
+        return JSON.stringify({ term0, importanceShown: imp, answer, advanced: term0 !== term1 });
+      })()`);
+      log.push('键盘 3→1→空格: ' + r5);
     } catch (e) {
       log.push('UI 测试出错: ' + e.message);
     }

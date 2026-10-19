@@ -295,8 +295,8 @@ function renderCard() {
       <div class="term">${esc(c.front)}</div>
       <div class="meta">这是重点吗？（判断 AI 判得准不准）</div>
       <div class="choices" style="grid-template-columns:1fr 1fr;max-width:420px;margin:0 auto">
-        <button class="choice" data-i="5">是重点<small>提高星级</small></button>
-        <button class="choice" data-i="2">不是<small>降低星级</small></button>
+        <button class="choice" data-i="5">是重点<small>提高星级</small><span class="kbd">1</span></button>
+        <button class="choice" data-i="2">不是<small>降低星级</small><span class="kbd">2</span></button>
       </div>`;
     inner.querySelectorAll('.choice').forEach((b) => {
       b.onclick = () => { REVIEW.humanImportance = Number(b.dataset.i); showAnswer(); };
@@ -381,7 +381,13 @@ window.addEventListener('keydown', (e) => {
   if (!REVIEW) return;
   if (e.key === 'Escape') { endReview(); route(); return; }
   if (REVIEW.phase === 'ask' && ['1', '2', '3', '4'].includes(e.key)) {
+    e.preventDefault();
     chooseRating(Number(e.key));
+  } else if (REVIEW.phase === 'importance' && ['1', '2'].includes(e.key)) {
+    // 1 = 是重点，2 = 不是
+    e.preventDefault();
+    REVIEW.humanImportance = e.key === '1' ? 5 : 2;
+    showAnswer();
   } else if (REVIEW.phase === 'answer' && (e.key === ' ' || e.key === 'Enter')) {
     e.preventDefault();
     nextCard();
