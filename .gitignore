@@ -4,6 +4,8 @@
 data/
 _probe/png/
 _probe/*.json
+_probe/chem_*.txt
+_probe/chem_*.png
 
 # ── Python ────────────────────────────────────────
 __pycache__/
