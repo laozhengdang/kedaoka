@@ -159,7 +159,8 @@ async function viewCourse(id) {
 
   w.innerHTML = `
     <h1>${esc(d.course.name)}</h1>
-    <p class="sub">共 ${d.course.cards || ''} 张卡 · ${d.course.mode === 'calc' ? '计算型' : '概念型'}</p>
+    <p class="sub">共 ${d.course.cards || ''} 张卡 · ${d.course.mode === 'calc' ? '计算型' : '概念型'}
+      · <a id="btnRefine" style="color:var(--accent);cursor:pointer;border-bottom:1px dotted">用 AI 重新整理术语</a></p>
     <div class="tabs">
       <div class="tab active" data-t="today">今天</div>
       <div class="tab" data-t="repo">仓库</div>
@@ -174,6 +175,8 @@ async function viewCourse(id) {
       if (t.dataset.t === 'graph') location.hash = `#/graph/${id}`;
     };
   });
+  const rb = w.querySelector('#btnRefine');
+  if (rb) rb.onclick = () => startRefine(id);
 
   const body = w.querySelector('#tabBody');
   if (!d.queue.total) {
@@ -617,6 +620,7 @@ async function viewCard(id) {
 // ---------------- 设置 ----------------
 async function viewSettings() {
   const d = await api('GET', '/api/settings');
+  const ai = await api('GET', '/api/ai/config');
   const p = d.profile;
   const m = $('#main');
   m.innerHTML = '';
@@ -643,12 +647,33 @@ async function viewSettings() {
     <div class="row" style="margin-top:16px">
       <button id="pSave" class="primary">保存</button>
     </div>
-    <h2>高级（折叠）</h2>
+    <h2>AI 接口（高级）</h2>
     <div class="detail">
-      <p class="sub">API 配置、预置仓库、导出——下一版实现。</p>
+      <p class="hint">接上模型之后，导入时会由 AI 读原文判断"哪些是术语"，比按颜色猜准得多。
+        推荐 DeepSeek（便宜够用）。任何 OpenAI 兼容接口都能填。</p>
+      <div class="row" style="align-items:center;gap:12px;margin-bottom:6px">
+        <label style="width:100px">接口地址</label>
+        <input id="aiBase" value="${esc(ai.baseUrl)}" placeholder="https://api.deepseek.com/v1">
+      </div>
+      <div class="row" style="align-items:center;gap:12px;margin-bottom:6px">
+        <label style="width:100px">模型</label>
+        <input id="aiModel" value="${esc(ai.model)}" placeholder="deepseek-chat">
+      </div>
+      <div class="row" style="align-items:center;gap:12px;margin-bottom:6px">
+        <label style="width:100px">API Key</label>
+        <input id="aiKey" type="password" placeholder="${ai.hasKey ? '已保存 ' + esc(ai.keyMask) + '（留空不改）' : 'sk-...'}">
+      </div>
+      <div class="row" style="align-items:center;gap:12px">
+        <label style="width:100px">每批页数</label>
+        <input id="aiPer" type="number" value="${ai.pagesPerRequest}" style="width:100px">
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="aiSave" class="primary small">保存</button>
+        <button id="aiTest" class="small">测试连接</button>
+      </div>
+      <pre id="aiTestOut" class="log hidden"></pre>
     </div>`;
-  m.appendChild(w);
-  $('#pSave').onclick = async () => {
+  m.appendChild(w);  $('#pSave').onclick = async () => {
     await api('POST', '/api/settings', {
       daily_new_max: Number($('#pNew').value) || 10,
       daily_review_max: Number($('#pRev').value) || 5,
@@ -661,6 +686,78 @@ async function viewSettings() {
     const b = await api('GET', '/api/bootstrap');
     STATE.profile = b.profile;
   };
+
+  // ---- AI 配置 ----
+  $('#aiSave').onclick = async () => {
+    const key = $('#aiKey').value.trim();
+    const body = { baseUrl: $('#aiBase').value.trim(), model: $('#aiModel').value.trim(), pagesPerRequest: Number($('#aiPer').value) || 3 };
+    if (key) body.apiKey = key;
+    const r = await api('POST', '/api/ai/config', body);
+    toast(r.hasKey ? 'AI 配置已保存' : '已保存（还没有 Key）');
+    $('#aiKey').value = '';
+  };
+  $('#aiTest').onclick = async () => {
+    const out = $('#aiTestOut');
+    out.classList.remove('hidden');
+    out.textContent = '测试中…';
+    try {
+      const r = await api('POST', '/api/ai/test', {});
+      out.textContent = `连接成功\n模型：${r.model}\n地址：${r.baseUrl}\n返回：${r.sample}`;
+    } catch (e) {
+      out.textContent = '失败：' + (e.message || e);
+    }
+  };
+}
+
+// ---------------- AI 精修 ----------------
+async function startRefine(courseId) {
+  const cfg = await api('GET', '/api/ai/config');
+  if (!cfg.hasKey && cfg.baseUrl !== 'mock') {
+    toast('还没配置 API Key');
+    location.hash = '#/settings';
+    return;
+  }
+  const { job } = await api('POST', `/api/refine/${courseId}`, {});
+  showRefineBox(job);
+}
+
+function showRefineBox(jobId) {
+  const box = el('div', 'modal');
+  box.id = 'refineBox';
+  box.innerHTML = `
+    <div class="modal-box" style="width:640px">
+      <h3>AI 正在重新整理术语</h3>
+      <p class="hint">同一份原文只会调用一次，重复跑不重复花钱。</p>
+      <div class="bar"><i id="refBar" style="width:0%"></i></div>
+      <div class="sub" id="refStat">准备中…</div>
+      <pre class="log" id="refLog" style="max-height:240px"></pre>
+      <div class="row"><button id="refClose" class="ghost small">关闭窗口（后台继续）</button></div>
+    </div>`;
+  document.body.appendChild(box);
+  $('#refClose').onclick = () => box.remove();
+
+  const timer = setInterval(async () => {
+    const j = await api('GET', `/api/refine-job/${jobId}`);
+    const pct = j.total ? Math.round((j.done / j.total) * 100) : 0;
+    const bar = $('#refBar');
+    if (bar) bar.style.width = pct + '%';
+    const st = $('#refStat');
+    if (st) st.textContent = `${j.done}/${j.total} 页 · 新增 ${j.created || 0} · 更新 ${j.updated || 0}`;
+    const log = $('#refLog');
+    if (log) log.textContent = (j.log || []).slice(-20).join('\n');
+    if (j.status !== 'running') {
+      clearInterval(timer);
+      if (j.status === 'done') {
+        toast(`AI 整理完成：新增 ${j.created} 张`);
+        const b = await api('GET', '/api/bootstrap');
+        STATE.courses = b.courses;
+        renderSidebar();
+        setTimeout(() => { box.remove(); route(); }, 1200);
+      } else {
+        toast('AI 整理失败：' + (j.error || '未知错误'));
+      }
+    }
+  }, 900);
 }
 
 // ---------------- 导入 ----------------

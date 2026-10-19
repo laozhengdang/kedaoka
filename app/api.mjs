@@ -194,6 +194,31 @@ const handlers = {
 
   'GET /api/courses': () => db.prepare('SELECT * FROM course ORDER BY created_at').all(),
 
+  // ---- AI 配置与精修 ----
+  'GET /api/ai/config': async () => {
+    const { getAiConfig, maskKey } = await import('./ai.mjs');
+    const c = getAiConfig();
+    return { baseUrl: c.baseUrl, model: c.model, hasKey: Boolean(c.apiKey), keyMask: maskKey(c.apiKey),
+      pagesPerRequest: c.pagesPerRequest };
+  },
+  'POST /api/ai/config': async (_p, b) => {
+    const { saveAiConfig, maskKey } = await import('./ai.mjs');
+    const c = saveAiConfig(b || {});
+    return { ok: true, baseUrl: c.baseUrl, model: c.model, hasKey: Boolean(c.apiKey), keyMask: maskKey(c.apiKey) };
+  },
+  'POST /api/ai/test': async () => {
+    const { testConnection } = await import('./ai.mjs');
+    return testConnection();
+  },
+  'POST /api/refine/:id': async (p) => {
+    const { startRefine } = await import('./ai.mjs');
+    return { job: startRefine(p.id) };
+  },
+  'GET /api/refine-job/:id': async (p) => {
+    const { getRefineJob } = await import('./ai.mjs');
+    return getRefineJob(p.id);
+  },
+
   // 关系图：章 → 页 → 术语（章节名从"第一节/第二章"这类行识别，真实结构，不猜）
   'GET /api/graph/:id': (p) => {
     const rows = db.prepare(`
