@@ -491,7 +491,75 @@ def main():
         }, ensure_ascii=False))
         return
 
-    # 2.5) 把"页标题"也当成概念收进来——它们是"包括/分为"的上位概念
+    # 2.3) 题库：按「题号 … 答案」切成一道道题
+    if args.doc_type == "exam":
+        exam_cards = 0
+        q_start = re.compile(r"^[（(]?([0-9]{1,3})[）).．、]")
+        ans_re = re.compile(r"(参考|正确)?答案[：:]\s*([A-Da-d对错√×]{1,4})")
+        cur = None   # {"no":int,"page":int,"lines":[]}
+
+        def flush():
+            nonlocal exam_cards, cur
+            if not cur:
+                return
+            body = "\n".join(cur["lines"]).strip()
+            if len(body) < 8:
+                cur = None
+                return
+            # 题干 = 第一行（去掉题号）；其余是选项/答案/解析
+            first, _, rest = body.partition("\n")
+            stem = re.sub(r"^[（(]?[0-9]{1,3}[）).．、]\s*", "", first).strip()
+            if len(stem) < 4:
+                stem = first[:60]
+            m = ans_re.search(body)
+            answer = m.group(2) if m else ""
+            back = body if len(body) <= 400 else body[:400] + "…"
+            if answer:
+                back = f"答案：{answer}\n\n{back}"
+            exists = conn.execute(
+                "SELECT c.id FROM term t JOIN concept c ON c.id=t.concept_id "
+                "WHERE t.text=? AND c.course_id=? AND t.kind='preferred'", (stem[:40], course_id)
+            ).fetchone()
+            if not exists:
+                concept_id = uid("cp_")
+                conn.execute("INSERT INTO concept(id,course_id,type,created_at) VALUES(?,?,?,?)",
+                             (concept_id, course_id, "unknown", now()))
+                conn.execute("INSERT INTO term(concept_id,text,kind,origin) VALUES(?,?,?,?)",
+                             (concept_id, stem[:40], "preferred", "exam"))
+                card_id = uid("card_")
+                conn.execute(
+                    "INSERT INTO card(id,course_id,concept_id,front,back,image_path,source_page,source_text,"
+                    "importance,origin,status,is_title,file_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (card_id, course_id, concept_id, stem[:60], back, None, cur["page"], body[:400],
+                     4, "exam", "active", 0, fid, now()),
+                )
+                conn.execute("INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?)",
+                             (card_id, "new", now()))
+                exam_cards += 1
+            cur = None
+
+        for pno in sorted(page_cache):
+            for ln in page_cache[pno]:
+                raw = (ln.get("text") or "").strip()
+                if not raw:
+                    continue
+                # PDF 抽出来的字常有空格（"1 . 下列…"），比对前先压掉空白
+                compact = re.sub(r"\s+", "", raw)
+                if q_start.match(compact):
+                    flush()
+                    cur = {"no": 0, "page": pno, "lines": [compact]}
+                elif cur:
+                    cur["lines"].append(compact)
+        flush()
+        conn.commit()
+        total = conn.execute("SELECT COUNT(*) FROM card WHERE course_id=?", (course_id,)).fetchone()[0]
+        print(json.dumps({
+            "ok": True, "kind": "exam", "created": exam_cards,
+            "file_id": fid, "course_id": course_id, "total_cards": total,
+        }, ensure_ascii=False))
+        return
+
+
     for pno, t in page_main_term.items():
         if not t or t in found:
             continue

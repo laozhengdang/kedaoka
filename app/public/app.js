@@ -339,6 +339,100 @@ async function boot() {
   bindChrome();
   bindTools();
   route();
+  // 第一次用（没课程、没走过引导）→ 三步引导
+  if (!STATE.profile.wizard_done && !STATE.courses.length) {
+    setTimeout(() => showWizard(), 2000);
+  }
+}
+
+// ---------- 首次启动引导 ----------
+function showWizard() {
+  let step = 1;
+  let prof = STATE.profession || '兽医学';
+  let courseName = '';
+  const box = el('div', 'modal');
+  document.body.appendChild(box);
+
+  const paint = () => {
+    box.innerHTML = `
+      <div class="modal-box" style="width:600px">
+        <div class="wiz-steps">
+          <span class="${step >= 1 ? 'on' : ''}">1 选专业</span>
+          <span class="${step >= 2 ? 'on' : ''}">2 建课程</span>
+          <span class="${step >= 3 ? 'on' : ''}">3 配 AI</span>
+        </div>
+        <div id="wizBody"></div>
+        <div class="row" style="margin-top:16px;justify-content:space-between">
+          <button id="wizSkip" class="ghost small">跳过引导</button>
+          <span>
+            ${step > 1 ? '<button id="wizPrev" class="ghost small">上一步</button>' : ''}
+            <button id="wizNext" class="primary small">${step === 3 ? '完成' : '下一步'}</button>
+          </span>
+        </div>
+      </div>`;
+    const body = box.querySelector('#wizBody');
+
+    if (step === 1) {
+      body.innerHTML = `
+        <h3>你在学哪个方向？</h3>
+        <p class="hint">这会决定 AI 判断"什么算术语"的标准。以后可以随时在左栏切换。</p>
+        <div class="row" style="gap:10px;margin-top:12px">
+          ${['兽医学', '动物科学', '草业科学'].map((n) => `<button class="small ${n === prof ? 'primary' : ''}" data-p="${n}">${n}</button>`).join('')}
+        </div>`;
+      body.querySelectorAll('[data-p]').forEach((b) => {
+        b.onclick = () => { prof = b.dataset.p; paint(); };
+      });
+    } else if (step === 2) {
+      body.innerHTML = `
+        <h3>建第一门课</h3>
+        <p class="hint">填课程名（例如 兽医免疫学）。建好后进这门课导入课件。</p>
+        <input id="wizCourse" placeholder="课程名" value="${esc(courseName)}">
+        <p class="sub" style="margin-top:8px">当前方向：${esc(prof)}</p>`;
+      box.querySelector('#wizCourse').oninput = (e) => { courseName = e.target.value; };
+    } else {
+      body.innerHTML = `
+        <h3>要不要接 AI？</h3>
+        <p class="hint">不接也能用：导入会按课件排版出一版卡片，只是术语质量差一些。<br>
+          接上之后可以：AI 整理术语、逐章画机制图、生成复习清单。</p>
+        <div class="row" style="gap:10px;margin-top:12px">
+          <button id="wizApi" class="primary small">去设置里填 Key</button>
+          <span class="sub">推荐 DeepSeek，一份课件几毛钱</span>
+        </div>`;
+      box.querySelector('#wizApi').onclick = () => {
+        finish(true);
+        location.hash = '#/settings';
+      };
+    }
+
+    box.querySelector('#wizSkip').onclick = () => finish(false);
+    const next = box.querySelector('#wizNext');
+    if (next) next.onclick = async () => {
+      if (step === 2 && !courseName.trim()) return toast('先填个课程名');
+      if (step === 2) {
+        try {
+          const r = await api('POST', '/api/course', { name: courseName.trim(), profession: prof });
+          await api('POST', '/api/profession', { name: prof });
+          const b = await api('GET', '/api/bootstrap');
+          STATE.courses = b.courses;
+          STATE.profession = prof;
+          renderSidebar();
+          window.__wizCourseId = r.id;
+        } catch (e) { return toast('建课失败：' + (e.message || e)); }
+      }
+      if (step < 3) { step += 1; paint(); } else finish(true);
+    };
+    const prev = box.querySelector('#wizPrev');
+    if (prev) prev.onclick = () => { step -= 1; paint(); };
+  };
+
+  const finish = async (go) => {
+    await api('POST', '/api/settings', { wizard_done: true });
+    box.remove();
+    const id = window.__wizCourseId;
+    if (id && go) location.hash = `#/course/${id}`;
+  };
+
+  paint();
 }
 
 // 启动画面：一句名言，1.8 秒后淡出，点任意处跳过
@@ -2031,6 +2125,7 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '',
       <button class="small ${kind === 'lab' ? 'primary' : ''}" data-k="lab">只看实验课</button>
     </div>
     <div class="row" style="margin-bottom:8px">
+      <button class="small ${view === 'chapter' ? 'primary' : ''}" data-v="chapter">按章节</button>
       <button class="small ${view === 'page' ? 'primary' : ''}" data-v="page">按页码</button>
       <button class="small ${view === 'star' ? 'primary' : ''}" data-v="star">按重要度</button>
       <button class="small ${view === 'az' ? 'primary' : ''}" data-v="az">A→Z</button>
@@ -2054,7 +2149,18 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '',
 
   const list = w.querySelector('#list');
   const groups = d.groups || {};
-  if (view === 'star') {
+  if (view === 'chapter') {
+    const byCh = new Map();
+    for (const c of d.cards) {
+      const k = c.chapter || '未分章';
+      if (!byCh.has(k)) byCh.set(k, []);
+      byCh.get(k).push(c);
+    }
+    for (const [k, rows] of byCh) {
+      list.appendChild(el('div', 'group-title', `${esc(k)}（${rows.length} 张）`));
+      for (const c of rows) list.appendChild(browseRow(c));
+    }
+  } else if (view === 'star') {
     const byStar = new Map();
     for (const c of d.cards) {
       const k = Number(c.importance) || 3;
