@@ -366,11 +366,26 @@ def main():
                     choices=["ppt", "exam", "notes", "syllabus"],
                     help="ppt=授课课件，exam=题库真题，notes=复习资料，syllabus=考纲提纲")
     ap.add_argument("--reparse", action="store_true", help="同一文件重新解析（先删旧数据）")
+    ap.add_argument("--probe", action="store_true", help="只探测，不写库：输出页数/图片数/字数")
     args = ap.parse_args()
 
     path = Path(args.file).resolve()
     if not path.exists():
         raise SystemExit(f"文件不存在: {path}")
+
+    if args.probe:
+        doc = pymupdf.open(path)
+        imgs = 0
+        chars = 0
+        for pg in doc:
+            chars += len(pg.get_text("text"))
+            imgs += len(pg.get_images(full=True))
+        print(json.dumps({
+            "ok": True, "probe": True, "pages": len(doc),
+            "images": imgs, "chars": chars,
+            "sizeMB": round(path.stat().st_size / 1048576, 1),
+        }, ensure_ascii=False))
+        return
 
     data = path.read_bytes()
     sha = hashlib.sha256(data).hexdigest()

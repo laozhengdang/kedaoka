@@ -1,4 +1,4 @@
-// main.mjs —— 桌面版入口（Electron）
+﻿// main.mjs —— 桌面版入口（Electron）
 // 不开本地端口、不经过浏览器：直接用 IPC 调 api.mjs，前端加载本地文件。
 
 import { app, BrowserWindow, ipcMain, shell, Menu } from 'electron';
@@ -46,7 +46,8 @@ async function createWindow() {
 
 // 前端所有数据请求都走这里
 ipcMain.handle('api', async (_e, { method, path, body }) => {
-  const { callApi, startImport, getJob } = await import('../api.mjs');
+  const { callApi, startImport, getJob, probeImport } = await import('../api.mjs');
+  if (path === '/api/probe' && method === 'POST') return probeImport(body.file);
   if (path === '/api/import' && method === 'POST') return { job: startImport(body.file, body.courseName, body.kind || 'theory', body.docType || 'ppt') };
   if (path.startsWith('/api/job/')) return getJob(path.slice('/api/job/'.length));
   return callApi(method, path, body || {});

@@ -504,3 +504,7 @@ html[data-theme="dark"] .exam-row-body { color: #c9c9c4; }
   letter-spacing: .02em; line-height: 1.8; max-width: 720px;
 }
 .splash-by { margin-top: 18px; font-size: 12px; color: var(--muted); letter-spacing: 2px; }
+
+/* 首次引导 */
+.guide-list { margin: 8px 0 0 20px; padding: 0; line-height: 2.1; }
+.guide-list li { font-size: 14px; }

@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, dirname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { callApi, startImport, getJob } from './api.mjs';
+import { callApi, startImport, getJob, probeImport } from './api.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, 'public');
@@ -39,6 +39,12 @@ const server = createServer(async (req, res) => {
         const job = startImport(b.file, b.courseName, b.kind || 'theory', b.docType || 'ppt');
         res.writeHead(200, { 'content-type': MIME['.json'] });
         return res.end(JSON.stringify({ job }));
+      }
+      if (path === '/api/probe' && req.method === 'POST') {
+        const b = await readBody(req);
+        const info = await probeImport(b.file);
+        res.writeHead(200, { 'content-type': MIME['.json'] });
+        return res.end(JSON.stringify(info));
       }
       if (path.startsWith('/api/job/')) {
         res.writeHead(200, { 'content-type': MIME['.json'] });

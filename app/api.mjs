@@ -1,4 +1,4 @@
-// api.mjs —— 所有业务逻辑都在这里，服务端和桌面端共用同一份。
+﻿// api.mjs —— 所有业务逻辑都在这里，服务端和桌面端共用同一份。
 // server.mjs（网页版）调 callApi；electron/main.mjs（桌面版）也调 callApi。
 
 import { spawn } from 'node:child_process';
@@ -1095,6 +1095,26 @@ export function startImport(filePath, courseName, kind = 'theory', docType = 'pp
     try { job.result = JSON.parse(job.log.trim().split('\n').pop()); } catch { /* noop */ }
   });
   return job.id;
+}
+
+// 导入前探测：页数/图片数/字数，用来做时长与费用预估
+export function probeImport(filePath) {
+  return new Promise((resolve, reject) => {
+    const py = spawn(pythonExe(), [join(ROOT, 'tools', 'ingest.py'), '--file', filePath, '--course-name', 'probe', '--probe'], {
+      cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+    });
+    let out = '';
+    py.stdout.on('data', (d) => { out += d.toString(); });
+    py.stderr.on('data', (d) => { out += d.toString(); });
+    py.on('error', (e) => reject(e));
+    py.on('close', (code) => {
+      try {
+        const line = out.trim().split('\n').filter(Boolean).pop();
+        const j = JSON.parse(line);
+        if (j.probe) resolve(j); else reject(new Error(out.slice(0, 200)));
+      } catch { reject(new Error('探测失败：' + out.slice(0, 200))); }
+    });
+  });
 }
 
 export function getJob(id) {

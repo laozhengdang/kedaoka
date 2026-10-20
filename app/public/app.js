@@ -496,6 +496,29 @@ async function pickImportFile() {
   $('#importPath').value = files[0];
   $('#importPicked').textContent = files.length > 1 ? `已选 ${files.length} 个（先导入第 1 个）` : '';
   if (files.length > 1) toast(`选了 ${files.length} 个，当前只导入第一个`);
+  probeFile(files[0]);
+}
+
+// 导入前探测：页数、图片数，顺带估个时长与花费
+async function probeFile(path) {
+  const box = $('#importLog');
+  if (box) box.textContent = '正在读文件…';
+  try {
+    const p = await api('POST', '/api/probe', { file: path });
+    // 粗估：每 3 页一批；每批 1 次抽取 + 1 次复核；DeepSeek 一批约 1～2 分钱
+    const batches = Math.ceil(p.pages / 3);
+    const calls = batches * 2;
+    const yuan = (calls * 0.01).toFixed(1);
+    const mins = Math.max(1, Math.round(batches * 2.5 / 60));
+    if (box) {
+      box.textContent =
+        `文件：${p.pages} 页 · ${p.images} 张图 · ${p.sizeMB} MB\n` +
+        `本地解析：约 1 分钟（不花钱）\n` +
+        `AI 整理：约 ${calls} 次调用、${mins} 分钟、粗估 ${yuan} 元（按 DeepSeek 价，仅供参考）`;
+    }
+  } catch (e) {
+    if (box) box.textContent = '探测失败：' + (e.message || e) + '\n（不影响导入，可以直接开始）';
+  }
 }
 
 // 拖拽整个窗口：把文件字节交给主进程落盘，拿到真实绝对路径
@@ -546,6 +569,7 @@ async function intakeDropped(files) {
   $('#importPath').value = paths[0];
   $('#importPicked').textContent = paths.length > 1 ? `还有 ${paths.length - 1} 个待导入` : '';
   log.textContent = `已接收：\n${paths.join('\n')}\n点「开始导入」继续。`;
+  probeFile(paths[0]);
   if (paths.length > 1) toast(`收到 ${paths.length} 个文件，先导入第一个`);
 }
 
@@ -612,7 +636,22 @@ async function viewHome() {
     <p class="sub">${STATE.courses.length} 门课程 · 待刷 ${totalLeft} 张</p>
     ${ST (STATE.profile.quote || '')}`;
   if (!STATE.courses.length) {
-    w.appendChild(el('div', 'empty', '还没有课程。点左下「新建学科」开始。'));
+    const guide = el('div', 'detail');
+    guide.innerHTML = `
+      <h2>先做这四步</h2>
+      <ol class="guide-list">
+        <li><b>建一门学科</b>：中间栏底部「＋ 新建学科」，填课程名（例如 兽医免疫学）。</li>
+        <li><b>导入课件</b>：进这门课 →「＋ 导入课件到本学科」→ 选 PDF 或直接拖进来。</li>
+        <li><b>配 AI（可选）</b>：左栏「设置」填 API Key，导入后会由 AI 整理术语、画机制图。</li>
+        <li><b>每天刷 10 张</b>：课程页「开始今天的」，四档自评即可。</li>
+      </ol>
+      <div class="row" style="margin-top:14px">
+        <button id="gNew" class="primary">现在就建一门</button>
+        <button id="gApi" class="ghost">先去配 API</button>
+      </div>`;
+    w.appendChild(guide);
+    guide.querySelector('#gNew').onclick = () => openNewCourse();
+    guide.querySelector('#gApi').onclick = () => { location.hash = '#/settings'; };
   } else {
     for (const c of STATE.courses) {
       const card = el('div', 'today-card');
@@ -1377,7 +1416,7 @@ async function viewStats(courseId) {
     </div>
     <div class="detail" style="margin-top:16px">
       <div>总卡片 <b>${d.total}</b> · 已毕业 <b>${grad}</b>（${d.total ? Math.round((grad / d.total) * 100) : 0}%）</div>
-      <div style="margin-top:6px">累计复习 <b>${d.reviews.n}</b> 次</div>
+      <div style="margin-top:6px">累计复习 <b>${d.reviews.n}</b> 次 · 累计用时约 <b>${Math.round((d.reviews.ms || 0) / 60000)}</b> 分钟</div>
     </div>
     <h2 style="margin-top:22px">各章掌握度</h2>
     <div class="detail">${chRows || '<p class="sub">还没有数据</p>'}</div>`;
@@ -1940,7 +1979,7 @@ async function viewGraph(id) {
 }
 
 // ---------------- 仓库 ----------------
-async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '') {
+async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '', view = 'page') {
   STATE.current = id;
   renderSidebar();
   const d = await api('GET', `/api/browse/${id}?q=${encodeURIComponent(q)}&filter=${filter}${kind ? '&kind=' + kind : ''}`);
@@ -1966,6 +2005,11 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '')
       <button class="small ${kind === 'theory' ? 'primary' : ''}" data-k="theory">只看理论课</button>
       <button class="small ${kind === 'lab' ? 'primary' : ''}" data-k="lab">只看实验课</button>
     </div>
+    <div class="row" style="margin-bottom:8px">
+      <button class="small ${view === 'page' ? 'primary' : ''}" data-v="page">按页码</button>
+      <button class="small ${view === 'star' ? 'primary' : ''}" data-v="star">按重要度</button>
+      <button class="small ${view === 'az' ? 'primary' : ''}" data-v="az">A→Z</button>
+    </div>
     <p class="sub">点击术语查看释义（默认折叠，先自己回想一遍）</p>
     <div id="list"></div>`;
   m.appendChild(w);
@@ -1977,26 +2021,53 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '')
     b.onclick = () => viewBrowse(id, q, b.dataset.f, false, kind);
   });
   w.querySelectorAll('[data-k]').forEach((b) => {
-    b.onclick = () => viewBrowse(id, q, filter, false, b.dataset.k);
+    b.onclick = () => viewBrowse(id, q, filter, false, b.dataset.k, view);
+  });
+  w.querySelectorAll('[data-v]').forEach((b) => {
+    b.onclick = () => viewBrowse(id, q, filter, false, kind, b.dataset.v);
   });
 
   const list = w.querySelector('#list');
   const groups = d.groups || {};
-  for (const pg of Object.keys(groups).sort((a, b) => Number(a) - Number(b))) {
-    list.appendChild(el('div', 'group-title', `第 ${pg} 页`));
-    for (const c of groups[pg]) {
-      const row = el('div', 'cardrow');
-      const where = c.chapter ? `${esc(c.chapter)} · 第 ${c.source_page} 页` : `第 ${c.source_page} 页`;
-      const mark = c.dia_count > 0 ? '<span class="badge-dia" title="有机制图">图</span>' : '';
-      row.innerHTML = `<span class="t">${esc(c.front)}</span>
+  if (view === 'star') {
+    const byStar = new Map();
+    for (const c of d.cards) {
+      const k = Number(c.importance) || 3;
+      if (!byStar.has(k)) byStar.set(k, []);
+      byStar.get(k).push(c);
+    }
+    for (const k of [...byStar.keys()].sort((a, b) => b - a)) {
+      list.appendChild(el('div', 'group-title', `★ ${k}（${byStar.get(k).length} 张）`));
+      for (const c of byStar.get(k)) list.appendChild(browseRow(c));
+    }
+  } else if (view === 'az') {
+    const sorted = [...d.cards].sort((a, b) => String(a.front).localeCompare(String(b.front), 'zh'));
+    let last = '';
+    for (const c of sorted) {
+      const k = String(c.front).slice(0, 1).toUpperCase();
+      if (k !== last) { list.appendChild(el('div', 'group-title', k)); last = k; }
+      list.appendChild(browseRow(c));
+    }
+  } else {
+    for (const pg of Object.keys(groups).sort((a, b) => Number(a) - Number(b))) {
+      list.appendChild(el('div', 'group-title', `第 ${pg} 页`));
+      for (const c of groups[pg]) list.appendChild(browseRow(c));
+    }
+  }
+  if (!d.cards.length) list.appendChild(el('div', 'empty', '没找到'));
+}
+
+// 仓库里的一行（三种视图共用）
+function browseRow(c) {
+  const row = el('div', 'cardrow');
+  const where = c.chapter ? `${esc(c.chapter)} · 第 ${c.source_page} 页` : `第 ${c.source_page} 页`;
+  const mark = c.dia_count > 0 ? '<span class="badge-dia" title="有机制图">图</span>' : '';
+  row.innerHTML = `<span class="t">${esc(c.front)}</span>
         <span class="star">${stars(c.importance)}</span>
         ${mark}
         <span class="pg" title="${esc(c.fileName || '')}">${where}</span>`;
-      row.onclick = () => { location.hash = `#/card/${c.id}`; };
-      list.appendChild(row);
-    }
-  }
-  if (!Object.keys(groups).length) list.appendChild(el('div', 'empty', '没找到'));
+  row.onclick = () => { location.hash = `#/card/${c.id}`; };
+  return row;
 }
 
 // ---------------- 卡片详情 / 编辑器 ----------------
