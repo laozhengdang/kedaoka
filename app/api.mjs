@@ -683,7 +683,15 @@ const handlers = {
         ORDER BY p2.id LIMIT 1)
       WHERE c.course_id=? AND c.status='active' AND c.is_title=0
       GROUP BY ch ORDER BY total DESC`).all(p.id);
-    return { days, total, byState, reviews, chapters };
+    // 最近 7 天标『模糊』(rating=3) 的词
+    const since = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+    const fuzzy = db.prepare(`
+      SELECT c.id, c.front, c.source_page AS page, COUNT(*) AS times
+      FROM review_log l JOIN card c ON c.id=l.card_id
+      WHERE c.course_id=? AND l.rating=3 AND substr(l.ts,1,10) >= ?
+      GROUP BY c.id ORDER BY times DESC, c.front LIMIT 40`).all(p.id, since);
+
+    return { days, total, byState, reviews, chapters, fuzzy };
   },
 
   // ---- 待审队列：AI 复核刷掉的候选词 ----

@@ -411,6 +411,7 @@ async function boot() {
     STATE.dataDir = await window.nativeApi.dataDir();
   }
   applyTheme(STATE.profile.theme || 'paper');
+  applyButtonStyle(STATE.profile);
   showSplash(STATE.profile);
   renderSidebar();
   bindChrome();
@@ -547,6 +548,11 @@ function showSplash(profile) {
 }
 
 // 换肤：内置三套走 data-theme，自定义直接覆盖 CSS 变量
+// 功能按钮：彩色（默认）或纯白
+function applyButtonStyle(profile) {
+  document.body.classList.toggle('plain-buttons', Boolean(profile && profile.plain_buttons));
+}
+
 function applyTheme(theme) {
   const t = ['paper', 'warm', 'dark', 'custom'].includes(theme) ? theme : 'paper';
   const root = document.documentElement;
@@ -866,19 +872,19 @@ async function viewCourse(id) {
     <h1>${esc(d.course.name)}</h1>
     <p class="sub">共 ${d.course.cards || ''} 张卡 · 理论 ${d.course.kinds?.theory || 0} / 实验 ${d.course.kinds?.lab || 0}
       · ${d.course.mode === 'calc' ? '计算型' : '概念型'}</p>
-    <div class="row" style="margin:10px 0 4px">
-      <button id="btnImportHere" class="small primary">＋ 导入课件到本学科</button>
-      <button id="btnRefine" class="small">用 AI 重新整理术语</button>
-      <button id="btnOutline" class="small">一键复习清单</button>
-      <button id="btnExam" class="small">模拟卷</button>
-      <button id="btnBroken" class="small">待修</button>
-      <button id="btnDiagrams" class="small">机制图</button>
-      <button id="btnSpot" class="small">考前抽检</button>
-      <button id="btnBatches" class="small">课件批次</button>
-      <button id="btnWrong" class="small">错题本</button>
-      <button id="btnPlan" class="small">考试模式</button>
-      <button id="btnStats" class="small">学习统计</button>
-      <button id="btnPending" class="small">待审</button>
+    <div class="row actions" style="margin:10px 0 4px">
+      <button id="btnImportHere" class="small btn-tint btn-c-import">＋ 导入课件到本学科</button>
+      <button id="btnRefine" class="small btn-tint btn-c-refine">用 AI 重新整理术语</button>
+      <button id="btnOutline" class="small btn-tint btn-c-outline">一键复习清单</button>
+      <button id="btnExam" class="small btn-tint btn-c-exam">模拟卷</button>
+      <button id="btnBroken" class="small btn-tint btn-c-broken">待修</button>
+      <button id="btnDiagrams" class="small btn-tint btn-c-diagram">机制图</button>
+      <button id="btnSpot" class="small btn-tint btn-c-spot">考前抽检</button>
+      <button id="btnBatches" class="small btn-tint btn-c-batches">课件批次</button>
+      <button id="btnWrong" class="small btn-tint btn-c-wrong">错题本</button>
+      <button id="btnPlan" class="small btn-tint btn-c-plan">考试模式</button>
+      <button id="btnStats" class="small btn-tint btn-c-stats">学习统计</button>
+      <button id="btnPending" class="small btn-tint btn-c-pending">待审</button>
     </div>
     <div class="tabs">
       <div class="tab active" data-t="today">今天</div>
@@ -1595,10 +1601,20 @@ async function viewStats(courseId) {
       <div>总卡片 <b>${d.total}</b> · 已毕业 <b>${grad}</b>（${d.total ? Math.round((grad / d.total) * 100) : 0}%）</div>
       <div style="margin-top:6px">累计复习 <b>${d.reviews.n}</b> 次 · 累计用时约 <b>${Math.round((d.reviews.ms || 0) / 60000)}</b> 分钟</div>
     </div>
+    <h2 style="margin-top:22px">最近 7 天标记「模糊」的词</h2>
+    <p class="sub">这些是你说"要看概念"的，点开能看释义。</p>
+    <div class="detail" id="fuzzyList">${(d.fuzzy || []).map((f) => `
+      <div class="cardrow" data-card="${f.id}">
+        <span class="t">${esc(f.front)}</span>
+        <span class="pg">模糊 ${f.times} 次 · 第 ${f.page} 页</span>
+      </div>`).join('') || '<p class="sub">这周没有标「模糊」的词。</p>'}</div>
     <h2 style="margin-top:22px">各章掌握度</h2>
     <div class="detail">${chRows || '<p class="sub">还没有数据</p>'}</div>`;
   m.appendChild(w);
   $('#stBack').onclick = () => { location.hash = `#/course/${courseId}`; };
+  w.querySelectorAll('#fuzzyList [data-card]').forEach((row) => {
+    row.onclick = () => { location.hash = `#/card/${row.dataset.card}`; };
+  });
 }
 
 // ---------------- 待审队列（AI 复核刷掉的词） ----------------
@@ -2473,9 +2489,19 @@ async function viewSettings() {
   const w = el('div', 'wrap');
   w.innerHTML = `
     <h1>设置</h1>
-    <h2>AI 接口</h2>
+    <div class="set-nav">
+      <a data-jump="sec-ai">AI 接口</a>
+      <a data-jump="sec-look">外观</a>
+      <a data-jump="sec-timer">计时器</a>
+      <a data-jump="sec-pace">学习节奏</a>
+      <a data-jump="sec-pref">显示偏好</a>
+      <a data-jump="sec-export">导出</a>
+      <a data-jump="sec-adv">高级</a>
+      <a data-jump="sec-about">关于</a>
+    </div>
+    <h2 id="sec-ai">AI 接口</h2>
     <div class="detail" id="aiPanel"></div>
-    <h2>外观</h2>
+    <h2 id="sec-look">外观</h2>
     <div class="detail">
       <p class="hint">配色在第一栏「主题」里切换，这里只管首页那句话。</p>
       <div class="row" style="align-items:center;gap:12px;margin-top:10px">
@@ -2489,7 +2515,7 @@ async function viewSettings() {
           placeholder="一天一个概念&#10;背不下来就先看懂一遍">${esc((p.quotes || []).join('\n'))}</textarea>
       </div>
     </div>
-    <h2>计时器</h2>
+    <h2 id="sec-timer">计时器</h2>
     <div class="detail">
       <label><input type="checkbox" id="pTimer" ${p.card_timer !== false ? 'checked' : ''}> 每张卡计时（超时只提醒，不替你作答）</label>
       <div class="row" style="align-items:center;gap:12px;margin-top:10px">
@@ -2498,7 +2524,7 @@ async function viewSettings() {
       </div>
       <p class="hint">复习界面右上还有「本轮累计」计时，那个不限时，只是让你知道坐了多久。</p>
     </div>
-    <h2>学习节奏</h2>
+    <h2 id="sec-pace">学习节奏</h2>
     <div class="detail">
       <div class="row" style="align-items:center;gap:12px">
         <label style="width:140px">每日新卡</label><input id="pNew" type="number" value="${p.daily_new_max}" style="width:120px">
@@ -2508,18 +2534,20 @@ async function viewSettings() {
       </div>
       <p class="hint">按课程计算：每门课各自独立（文档 D72）</p>
     </div>
-    <h2>显示偏好</h2>
+    <h2 id="sec-pref">显示偏好</h2>
     <div class="detail">
       <label><input type="checkbox" id="pWeek" ${p.show_week ? 'checked' : ''}> 显示周视图</label><br>
       <label><input type="checkbox" id="pProg" ${p.show_progress ? 'checked' : ''}> 显示总进度</label><br>
       <label><input type="checkbox" id="pStreak" ${p.show_streak ? 'checked' : ''}> 显示连续天数</label><br>
       <label><input type="checkbox" id="pSplash" ${p.splash ? 'checked' : ''}> 启动画面</label><br>
       <label><input type="checkbox" id="pShuffle" ${p.shuffle ? 'checked' : ''}> 复习乱序（每天打散顺序）</label>
+      <br>
+      <label><input type="checkbox" id="pPlainBtn" ${p.plain_buttons ? 'checked' : ''}> 功能按钮用纯白色（不勾选=彩色区分）</label>
     </div>
     <div class="row" style="margin-top:16px">
       <button id="pSave" class="primary">保存</button>
     </div>
-    <details class="adv-box">
+    <details class="adv-box" id="sec-adv">
       <summary>高级（谨慎操作）</summary>
       <div class="detail">
         <p class="hint">这些操作会直接影响数据，用完最好跑一次自检。</p>
@@ -2532,7 +2560,7 @@ async function viewSettings() {
         <pre id="advOut" class="log hidden"></pre>
       </div>
     </details>
-    <h2>导出</h2>
+    <h2 id="sec-export">导出</h2>
     <div class="detail">
       <p class="hint">把卡片导成文件：Markdown 方便打印/贴到别处，CSV 能进 Excel。</p>
       <div class="row" style="margin-top:8px">
@@ -2545,11 +2573,20 @@ async function viewSettings() {
       </div>
       <pre id="expOut" class="log hidden"></pre>
     </div>
-    <h2>关于</h2>
+    <h2 id="sec-about">关于</h2>
     <div class="detail">
       <div class="row"><button id="btnAbout" class="small">版本与说明</button></div>
     </div>`;
-  m.appendChild(w);  $('#btnAbout').onclick = () => showAbout();
+  m.appendChild(w);  w.querySelectorAll('[data-jump]').forEach((a) => {
+    a.onclick = () => {
+      const elx = document.getElementById(a.dataset.jump);
+      if (elx) {
+        if (elx.tagName === 'DETAILS') elx.open = true;
+        elx.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+  });
+  $('#btnAbout').onclick = () => showAbout();
   const aq = $('#advClearQueue');
   if (aq) aq.onclick = async () => {
     if (!confirm('清空今天所有课程的队列？卡片和复习记录都会保留。')) return;
@@ -2599,6 +2636,7 @@ async function viewSettings() {
       show_streak: $('#pStreak').checked,
       splash: $('#pSplash').checked,
       shuffle: $('#pShuffle').checked,
+      plain_buttons: $('#pPlainBtn').checked,
       theme: STATE.profile.theme || 'paper',
       quote: $('#pQuote').value.trim(),
       quotes: ($('#pQuotes').value || '').split('\n').map((s) => s.trim()).filter(Boolean),
@@ -2608,6 +2646,7 @@ async function viewSettings() {
     toast('已保存');
     const b = await api('GET', '/api/bootstrap');
     STATE.profile = b.profile;
+    applyButtonStyle(STATE.profile);
     applyTheme(STATE.profile.theme || 'paper');
   };
 

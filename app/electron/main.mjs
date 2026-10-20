@@ -201,6 +201,15 @@ app.whenReady().then(async () => {
         return (document.body.innerText || '').slice(0, 160);
       })()`);
       log.push('课程页文本: ' + r1.replace(/\\n/g, ' | '));
+      try {
+        const { writeFileSync: wf2 } = await import('node:fs');
+        await win.webContents.executeJavaScript(`(async () => {
+          document.querySelector('#splash')?.click();
+          await new Promise(r => setTimeout(r, 700));
+        })()`);
+        const shotCourse = await win.webContents.capturePage();
+        wf2(join(process.env.MIAOMIAO_DATA || '.', 'shot-course.png'), shotCourse.toPNG());
+      } catch { /* noop */ }
       const r2 = await win.webContents.executeJavaScript(`(async () => {
         const btn = [...document.querySelectorAll('button')]
           .find(b => /开始今天的|继续|看结算/.test(b.textContent));
@@ -324,6 +333,17 @@ app.whenReady().then(async () => {
         return JSON.stringify({ panel: panel.replace(/\\n/g, ' | ').slice(0, 160) });
       })()`);
       log.push('AI 面板: ' + r10);
+      // 设置页截图（此时还在设置页，能看清显示偏好那一块）
+      try {
+        const { writeFileSync: wf } = await import('node:fs');
+        await win.webContents.executeJavaScript(`(async () => {
+          const elx = document.querySelector('#pShuffle');
+          if (elx) elx.scrollIntoView({ block: 'center' });
+          await new Promise(r => setTimeout(r, 400));
+        })()`);
+        const shotSet = await win.webContents.capturePage();
+        wf(join(process.env.MIAOMIAO_DATA || '.', 'shot-settings.png'), shotSet.toPNG());
+      } catch { /* noop */ }
       // 关键控件体检：确认新功能真的在界面上
       const audit = await win.webContents.executeJavaScript(`JSON.stringify({
         balance: (document.querySelector('#balanceText') || {}).textContent || '',
@@ -383,7 +403,7 @@ app.whenReady().then(async () => {
       try {
         const { writeFileSync } = await import('node:fs');
         const shot = await win.webContents.capturePage();
-        writeFileSync(join(process.env.MIAOMIAO_DATA || '.', 'shot-settings.png'), shot.toPNG());
+        writeFileSync(join(process.env.MIAOMIAO_DATA || '.', 'shot-final.png'), shot.toPNG());
       } catch { /* noop */ }
     } catch (e) {
       log.push('UI 测试出错: ' + e.message);

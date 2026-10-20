@@ -552,3 +552,53 @@ html[data-theme="dark"] .streak-badge { background: #3a2f14; border-color: #6b57
 .imgview-stage img { max-width: 92vw; max-height: 82vh; transform-origin: center center; transition: transform .05s linear; }
 .imgview-foot { display: flex; gap: 20px; padding: 12px 18px; color: #bcbcbc; font-size: 13px; }
 .imgview-foot a { color: #9fc1ff; cursor: pointer; }
+
+
+/* ---------- 设置页跳转条 ---------- */
+.set-nav {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 18px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--line);
+}
+.set-nav a {
+  font-size: 12px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--muted); cursor: pointer;
+}
+.set-nav a:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- 功能按钮配色（课程页那一排） ---------- */
+.btn-tint { border-width: 1px; }
+.btn-c-import { background: #e8f2ff; border-color: #a9c6ea; color: #14427a; }
+.btn-c-refine { background: #efe9ff; border-color: #c2b3ea; color: #4a2f8a; }
+.btn-c-outline { background: #e9f7ee; border-color: #a8d8bb; color: #175c33; }
+.btn-c-exam { background: #fff0e6; border-color: #f0c299; color: #8a4b12; }
+.btn-c-spot { background: #fdeef7; border-color: #eeb2d5; color: #7d2760; }
+.btn-c-broken { background: #fdeceb; border-color: #f0b8b3; color: #8f1d15; }
+.btn-c-diagram { background: #e8f6f8; border-color: #a8d5dc; color: #0f5a66; }
+.btn-c-wrong { background: #fff6df; border-color: #efd79a; color: #7a5600; }
+.btn-c-plan { background: #eef0f8; border-color: #bcc3e0; color: #33406b; }
+.btn-c-stats { background: #eef7e6; border-color: #bcd9a4; color: #33591a; }
+.btn-c-pending { background: #f6f0e8; border-color: #dcc9ad; color: #6b4f2a; }
+.btn-c-batches { background: #f0f0f0; border-color: #cccccc; color: #444; }
+
+html[data-theme="dark"] .btn-c-import { background: #1b2a3f; border-color: #35527d; color: #a9c6f5; }
+html[data-theme="dark"] .btn-c-refine { background: #2a2440; border-color: #4b3f78; color: #c2b3ea; }
+html[data-theme="dark"] .btn-c-outline { background: #1c3327; border-color: #35604a; color: #a8d8bb; }
+html[data-theme="dark"] .btn-c-exam { background: #3a2a1c; border-color: #6d4b2d; color: #f0c299; }
+html[data-theme="dark"] .btn-c-spot { background: #3a1f31; border-color: #6d3b59; color: #eeb2d5; }
+html[data-theme="dark"] .btn-c-broken { background: #38201f; border-color: #6e3d3a; color: #f0b8b3; }
+html[data-theme="dark"] .btn-c-diagram { background: #1b333a; border-color: #2f5f68; color: #a8d5dc; }
+html[data-theme="dark"] .btn-c-wrong { background: #3a3115; border-color: #6b5a26; color: #efd79a; }
+html[data-theme="dark"] .btn-c-plan { background: #232741; border-color: #3f4670; color: #bcc3e0; }
+html[data-theme="dark"] .btn-c-stats { background: #23301b; border-color: #40592f; color: #bcd9a4; }
+html[data-theme="dark"] .btn-c-pending { background: #322a20; border-color: #5c4b34; color: #dcc9ad; }
+html[data-theme="dark"] .btn-c-batches { background: #2a2a2a; border-color: #4a4a4a; color: #bbb; }
+
+/* 纯白模式：去掉底色 */
+body.plain-buttons .btn-tint {
+  background: var(--panel) !important; border-color: var(--line) !important; color: var(--ink) !important;
+}
+
+
+/* 课程页功能按钮：一行放不下自动折行，文字不竖着断 */
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.actions .btn-tint { white-space: nowrap; padding: 7px 14px; border-radius: 10px; }
