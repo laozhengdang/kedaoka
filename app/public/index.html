@@ -9,26 +9,48 @@
 </head>
 <body>
 <div id="app">
-  <aside id="sidebar">
+  <!-- 第一栏：工具 -->
+  <aside id="toolbar">
     <div class="brand">妙妙小工具</div>
-    <div class="side-label">课程</div>
-    <div class="courses" id="courseList"></div>
-    <div class="side-label">工具</div>
+    <div class="side-label">科目</div>
     <div class="tools">
-      <button id="btnTimer" class="tool-row">
-        <span>独立计时器</span><span id="timerText" class="tool-val">00:00</span>
-      </button>
-      <div class="tool-row" style="cursor:default">
-        <span>方向</span>
-        <select id="profPick" class="tool-val" style="width:96px"></select>
+      <div class="tool-block">
+        <div class="tool-cap">目前选择</div>
+        <select id="profPick" class="tool-select"></select>
       </div>
     </div>
+    <div class="side-label">独立计时器</div>
+    <div class="tools">
+      <button id="btnTimer" class="tool-row">
+        <span id="timerText" class="tool-clock">00:00</span>
+      </button>
+      <div class="tool-hint" id="timerHint">点一下开始 · 右键清零</div>
+    </div>
+    <div class="side-label">主题</div>
+    <div class="tools">
+      <div class="theme-row" id="themeRow">
+        <div class="theme-chip paper" data-theme-pick="paper" title="纸白">纸</div>
+        <div class="theme-chip warm" data-theme-pick="warm" title="米黄">米</div>
+        <div class="theme-chip dark" data-theme-pick="dark" title="夜间">夜</div>
+      </div>
+    </div>
+    <div class="side-label">其他小工具</div>
+    <div class="tools">
+      <div class="tool-hint">尚未开发</div>
+    </div>
+  </aside>
+
+  <!-- 第二栏：课程 -->
+  <aside id="sidebar">
+    <div class="side-label">课程</div>
+    <div class="courses" id="courseList"></div>
     <div class="side-foot">
       <button id="btnNewCourse" class="ghost">＋ 新建学科</button>
       <button id="btnSettings" class="ghost">设置</button>
-      <button id="btnCollapse" class="ghost" title="收起侧栏">«</button>
+      <button id="btnCollapse" class="ghost" title="收起课程栏">«</button>
     </div>
   </aside>
+
   <main id="main"></main>
 </div>
 

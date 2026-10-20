@@ -67,52 +67,67 @@ function renderSidebar() {
   }
 }
 
-// ---------------- 工具区：独立计时器 ----------------
-const FOCUS = { running: false, t0: 0, acc: 0, timer: null };
+// ---------------- 第一栏：工具 ----------------
+const FOCUS = { running: false, t0: 0, acc: 0 };
 
 function bindTools() {
-  // 独立计时器：自己点开始，跟复习无关
+  // 独立计时器：左键开始/暂停，右键清零
   const btn = $('#btnTimer');
   const text = $('#timerText');
+  const hint = $('#timerHint');
   const paint = () => {
     const ms = FOCUS.acc + (FOCUS.running ? Date.now() - FOCUS.t0 : 0);
     const s = Math.floor(ms / 1000);
     text.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
     btn.classList.toggle('running', FOCUS.running);
-    btn.title = FOCUS.running ? '点击暂停' : '点击开始计时';
+    if (hint) hint.textContent = FOCUS.running ? '计时中 · 点一下暂停 · 右键清零' : '点一下开始 · 右键清零';
   };
-  const tick = () => { if (FOCUS.running) paint(); };
   btn.onclick = () => {
-    if (FOCUS.running) {
-      FOCUS.acc += Date.now() - FOCUS.t0;
-      FOCUS.running = false;
-    } else {
-      FOCUS.t0 = Date.now();
-      FOCUS.running = true;
-    }
+    if (FOCUS.running) { FOCUS.acc += Date.now() - FOCUS.t0; FOCUS.running = false; }
+    else { FOCUS.t0 = Date.now(); FOCUS.running = true; }
     paint();
   };
-  btn.oncontextmenu = (e) => {           // 右键清零
+  btn.oncontextmenu = (e) => {
     e.preventDefault();
-    FOCUS.acc = 0;
-    FOCUS.running = false;
+    FOCUS.acc = 0; FOCUS.running = false;
     paint();
   };
-  setInterval(tick, 500);
+  setInterval(() => { if (FOCUS.running) paint(); }, 500);
   paint();
 
-  // 方向切换
+  // 科目（方向）
   const pick = $('#profPick');
   const names = (STATE.professions || []).map((p) => p.name);
   if (!names.includes('兽医学')) names.unshift('兽医学');
   if (!names.includes('草业科学')) names.push('草业科学');
-  pick.innerHTML = names.map((n) => `<option${n === (STATE.profession || '兽医学') ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  pick.innerHTML = names
+    .map((n) => `<option${n === (STATE.profession || '兽医学') ? ' selected' : ''}>${esc(n)}</option>`)
+    .join('');
   pick.onchange = async () => {
     await api('POST', '/api/profession', { name: pick.value });
     STATE.profession = pick.value;
     renderSidebar();
     toast(`已切换到「${pick.value}」`);
   };
+
+  // 主题：第一栏里直接换
+  paintThemeChips();
+  document.querySelectorAll('#themeRow [data-theme-pick]').forEach((chip) => {
+    chip.onclick = async () => {
+      applyTheme(chip.dataset.themePick);
+      paintThemeChips();
+      await api('POST', '/api/settings', { theme: chip.dataset.themePick });
+      const b = await api('GET', '/api/bootstrap');
+      STATE.profile = b.profile;
+    };
+  });
+}
+
+function paintThemeChips() {
+  const cur = (STATE.profile && STATE.profile.theme) || 'paper';
+  document.querySelectorAll('[data-theme-pick]').forEach((chip) => {
+    chip.dataset.on = chip.dataset.themePick === cur ? '1' : '0';
+  });
 }
 
 // ---------------- 路由 ----------------
@@ -140,6 +155,7 @@ function applyTheme(theme) {
   const t = ['paper', 'warm', 'dark'].includes(theme) ? theme : 'paper';
   document.documentElement.dataset.theme = t;
   STATE.profile.theme = t;
+  paintThemeChips();
 }
 
 // 图片地址：桌面版拼 file://，网页版走 /img/
@@ -1014,13 +1030,8 @@ async function viewSettings() {
     <div class="detail" id="aiPanel"></div>
     <h2>外观</h2>
     <div class="detail">
-      <div class="sub">配色</div>
-      <div class="theme-row">
-        <div class="theme-chip paper" data-theme-pick="paper">纸白</div>
-        <div class="theme-chip warm" data-theme-pick="warm">米黄</div>
-        <div class="theme-chip dark" data-theme-pick="dark">夜间</div>
-      </div>
-      <div class="row" style="align-items:center;gap:12px;margin-top:14px">
+      <p class="hint">配色在第一栏「主题」里切换，这里只管首页那句话。</p>
+      <div class="row" style="align-items:center;gap:12px;margin-top:10px">
         <label style="width:140px">首页一句话</label>
         <input id="pQuote" value="${esc(p.quote || '')}" placeholder="留空则不显示（可用「正文 —— 出处」）">
       </div>
