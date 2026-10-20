@@ -70,35 +70,38 @@ function renderSidebar() {
 // ---------------- 第一栏：工具 ----------------
 const FOCUS = { running: false, t0: 0, acc: 0, milestones: [], full: false };
 
+// 时钟绘制（工具区小钟 + 专注界面大钟一起刷）
+function paintClockGlobal() {
+  const ms = FOCUS.acc + (FOCUS.running ? Date.now() - FOCUS.t0 : 0);
+  const s = Math.floor(ms / 1000);
+  const label = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const text = $('#timerText');
+  if (text) text.textContent = label;
+  const big = $('#focusClock');
+  if (big) big.textContent = label;
+  const btn = $('#btnTimer');
+  if (btn) btn.classList.toggle('running', FOCUS.running);
+  const hint = $('#timerHint');
+  if (hint) hint.textContent = FOCUS.running ? '计时中 · 再次点开可暂停' : '点一下进入专注计时';
+}
+
 function bindTools() {
   // 独立计时器：点一下进入独占全屏的专注界面
   const btn = $('#btnTimer');
-  const text = $('#timerText');
-  const hint = $('#timerHint');
-  const paintClock = () => {
-    const ms = FOCUS.acc + (FOCUS.running ? Date.now() - FOCUS.t0 : 0);
-    const s = Math.floor(ms / 1000);
-    const label = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-    text.textContent = label;
-    const big = $('#focusClock');
-    if (big) big.textContent = label;
-    btn.classList.toggle('running', FOCUS.running);
-    if (hint) hint.textContent = FOCUS.running ? '计时中 · 再次点开可暂停' : '点一下进入专注计时';
-  };
   btn.onclick = () => openFocus();
 
-  // 科目（方向）
+  // 科目（方向）+ 新建科目
   const pick = $('#profPick');
   const names = (STATE.professions || []).map((p) => p.name);
   for (const n of ['兽医学', '草业科学', '动物科学']) if (!names.includes(n)) names.push(n);
   pick.innerHTML = names
     .map((n) => `<option${n === (STATE.profession || '兽医学') ? ' selected' : ''}>${esc(n)}</option>`)
-    .join('');
+    .join('') + '<option value="__new">＋ 新建科目…</option>';
   pick.onchange = async () => {
+    if (pick.value === '__new') { pick.value = STATE.profession || '兽医学'; openNewProf(); return; }
     const name = pick.value;
     await api('POST', '/api/profession', { name });
     STATE.profession = name;
-    // 专业变了，提示词里的专业也跟着变（服务端读 profile，无需额外操作）
     renderSidebar();
     toast(`已切换到「${name}」，AI 提示词同步换成该专业`);
   };
@@ -117,8 +120,12 @@ function bindTools() {
 
   bindFocus();
   bindThemeModal();
-  setInterval(() => { if (FOCUS.running) paintClock(); }, 500);
-  paintClock();
+  bindNewProf();
+  if (!window.__toolsTicked) {
+    window.__toolsTicked = true;
+    setInterval(() => { if (FOCUS.running) paintClockGlobal(); }, 500);
+  }
+  paintClockGlobal();
 }
 
 // ---------- 专注计时器 ----------
@@ -191,6 +198,55 @@ window.addEventListener('keydown', (e) => {
     closeFocus();
   }
 });
+
+// ---------- 新建科目：让 AI 现编提示词 ----------
+let NEW_PROF = null;
+
+function openNewProf() {
+  NEW_PROF = null;
+  $('#newProfName').value = '';
+  $('#newProfOut').classList.add('hidden');
+  $('#newProfOut').textContent = '';
+  $('#newProfActions').classList.add('hidden');
+  $('#newProfModal').classList.remove('hidden');
+  $('#newProfName').focus();
+}
+
+function bindNewProf() {
+  $('#newProfClose').onclick = () => $('#newProfModal').classList.add('hidden');
+  $('#newProfGen').onclick = async () => {
+    const name = $('#newProfName').value.trim();
+    if (!name) return toast('先填专业名称');
+    const out = $('#newProfOut');
+    out.classList.remove('hidden');
+    out.textContent = `正在让 AI 为「${name}」写判断依据…`;
+    $('#newProfActions').classList.add('hidden');
+    try {
+      const r = await api('POST', '/api/profession/hint', { name });
+      NEW_PROF = r;
+      out.textContent =
+        `术语范围：${r.hint}\n\n` +
+        `例子：${(r.examples || []).join('、') || '—'}\n\n` +
+        `不抽这些：${(r.avoid || []).join('；') || '—'}`;
+      $('#newProfActions').classList.remove('hidden');
+    } catch (e) {
+      out.textContent = '生成失败：' + (e.message || e);
+    }
+  };
+  $('#newProfSave').onclick = async () => {
+    if (!NEW_PROF) return;
+    const name = NEW_PROF.name;
+    await api('POST', '/api/profession', { name });
+    STATE.profession = name;
+    const b = await api('GET', '/api/bootstrap');
+    STATE.professions = b.professions || [];
+    STATE.courses = b.courses;
+    $('#newProfModal').classList.add('hidden');
+    bindTools();          // 重新渲染科目下拉
+    renderSidebar();
+    toast(`已新建「${name}」并切换过去`);
+  };
+}
 
 // ---------- 自定义主题 ----------
 let THEME_TMP = null;

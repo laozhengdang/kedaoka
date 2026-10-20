@@ -144,6 +144,8 @@ CREATE TABLE IF NOT EXISTS profile (key TEXT PRIMARY KEY, value TEXT);
 db.exec(SCHEMA);
 ensureColumn('card', 'file_id', 'file_id TEXT');
 ensureColumn('source_file', 'kind', "kind TEXT NOT NULL DEFAULT 'theory'");
+// 每个专业可以有自己的"术语范围"提示词（AI 生成，存在 profession.term_hint）
+ensureColumn('profession', 'term_hint', 'term_hint TEXT');
 
 // 队列支持"再来一轮"：给 daily_queue 加 round，并把唯一约束改成四列
 if (!db.prepare('PRAGMA table_info(daily_queue)').all().map((c) => c.name).includes('round')) {

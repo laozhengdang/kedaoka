@@ -1,4 +1,4 @@
-﻿// ai.mjs —— 接大模型：配置、调用、把逐页原文变成"术语 + 定义 + 关系"
+// ai.mjs —— 接大模型：配置、调用、把逐页原文变成"术语 + 定义 + 关系"
 //
 // 设计要点（对应文档 D61 / D82）：
 //   - 只支持 OpenAI 兼容的 /chat/completions，DeepSeek / Kimi / 智谱 / OpenAI 都能填
@@ -114,8 +114,62 @@ function majorName() {
   return String(p);
 }
 
+// 优先用专业自己在库里存的提示词（AI 生成），没有就退回内置表
 function majorHint() {
-  return MAJOR_HINT[majorName()] || MAJOR_HINT.兽医学;
+  const name = majorName();
+  try {
+    const row = db.prepare('SELECT term_hint FROM profession WHERE name=?').get(name);
+    if (row && row.term_hint) {
+      const parsed = JSON.parse(row.term_hint);
+      if (parsed && parsed.hint) return parsed.hint;
+    }
+  } catch { /* 读不到就用内置的 */ }
+  return MAJOR_HINT[name] || `该专业（${name}）考试常考的核心概念`;
+}
+
+// 新建专业时，让 AI 现编一套"该抽什么术语"的判断依据
+export async function genProfessionHint(name) {
+  const cfg = getAiConfig();
+  if (cfg.baseUrl !== 'mock' && !cfg.apiKey) throw new Error('还没配置 API Key，先去设置里填');
+  const sys = `你是中国农业大学的教学顾问。用户要新建一个专业方向："${name}"。
+请写出这个专业的课件里"哪些词算专业术语、考试会考"的判断依据，供 AI 抽取复习卡片时使用。
+
+要求：
+- hint：一句话，列出这个专业考试常考的概念类别，用顿号隔开，不超过 60 字
+- examples：6~10 个该专业真实会出现的术语例子（不要编造生僻词）
+- avoid：3~5 类在这个专业里不算术语的常见干扰项
+
+只输出 JSON：
+{"hint":"","examples":[],"avoid":[]}`;
+  const { text } = await chat(cfg, [
+    { role: 'system', content: sys },
+    { role: 'user', content: `专业名称：${name}` },
+  ], { maxTokens: 600 });
+  const parsed = parseJson(text);
+  if (!parsed || !parsed.hint) throw new Error('AI 没给出可用的提示词，再试一次');
+  return {
+    hint: String(parsed.hint).slice(0, 200),
+    examples: Array.isArray(parsed.examples) ? parsed.examples.slice(0, 10) : [],
+    avoid: Array.isArray(parsed.avoid) ? parsed.avoid.slice(0, 6) : [],
+  };
+}
+
+export function saveProfessionHint(name, data) {
+  const row = db.prepare('SELECT id FROM profession WHERE name=?').get(name);
+  const json = JSON.stringify(data);
+  if (row) {
+    db.prepare('UPDATE profession SET term_hint=? WHERE id=?').run(json, row.id);
+    return row.id;
+  }
+  const id = uid('prof_');
+  db.prepare('INSERT INTO profession(id,name,term_hint) VALUES(?,?,?)').run(id, name, json);
+  return id;
+}
+
+export function getProfessionHint(name) {
+  const row = db.prepare('SELECT term_hint FROM profession WHERE name=?').get(name);
+  if (!row || !row.term_hint) return null;
+  try { return JSON.parse(row.term_hint); } catch { return null; }
 }
 
 const SYSTEM = () => `你是中国农业大学${majorName()}专业的助教，负责把课件原文整理成"能考"的复习卡片。

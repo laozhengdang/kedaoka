@@ -391,6 +391,21 @@ const handlers = {
     return { ok: true, profile: getProfile() };
   },
 
+  // 新建专业时让 AI 现编提示词
+  'POST /api/profession/hint': async (_p, b) => {
+    const name = String(b?.name || '').trim();
+    if (!name) throw new Error('专业名不能为空');
+    const { genProfessionHint, saveProfessionHint } = await import('./ai.mjs');
+    const data = await genProfessionHint(name);
+    saveProfessionHint(name, data);
+    return { ok: true, name, ...data };
+  },
+  'GET /api/profession/hint': async (p) => {
+    const { getProfessionHint } = await import('./ai.mjs');
+    return { hint: getProfessionHint(p.query?.name || getProfile().profession || '兽医学') };
+  },
+  'GET /api/professions': () => db.prepare('SELECT id, name, term_hint FROM profession ORDER BY name').all(),
+
   'GET /api/courses': () => db.prepare('SELECT * FROM course ORDER BY created_at').all(),
 
   // 新建学科（先建空课程，再往里导课件）
