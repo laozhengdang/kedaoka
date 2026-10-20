@@ -161,6 +161,8 @@ CREATE TABLE IF NOT EXISTS profile (key TEXT PRIMARY KEY, value TEXT);
 db.exec(SCHEMA);
 ensureColumn('card', 'file_id', 'file_id TEXT');
 ensureColumn('source_file', 'kind', "kind TEXT NOT NULL DEFAULT 'theory'");
+// 批次管理：移除某一批课件时把 active 置 0，不删数据（可恢复）
+ensureColumn('source_file', 'active', 'active INTEGER NOT NULL DEFAULT 1');
 // 每个专业可以有自己的"术语范围"提示词（AI 生成，存在 profession.term_hint）
 ensureColumn('profession', 'term_hint', 'term_hint TEXT');
 

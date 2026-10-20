@@ -501,6 +501,8 @@ async function route() {
   if (parts[0] === 'card' && parts[1]) return viewCard(parts[1]);
   if (parts[0] === 'exam' && parts[1]) return viewExam(parts[1]);
   if (parts[0] === 'diagram' && parts[1]) return viewDiagram(parts[1], parts[2] || '');
+  if (parts[0] === 'spot' && parts[1]) return viewSpot(parts[1]);
+  if (parts[0] === 'batches' && parts[1]) return viewBatches(parts[1]);
   if (parts[0] === 'broken' && parts[1]) return viewBroken(parts[1]);
   if (parts[0] === 'outline' && parts[1]) return viewOutline(parts[1]);
   if (parts[0] === 'summary' && parts[1]) return viewSummary(parts[1]);
@@ -566,6 +568,8 @@ async function viewCourse(id) {
       <button id="btnExam" class="small">模拟考</button>
       <button id="btnBroken" class="small">待修</button>
       <button id="btnDiagrams" class="small">机制图</button>
+      <button id="btnSpot" class="small">考前抽检</button>
+      <button id="btnBatches" class="small">课件批次</button>
     </div>
     <div class="tabs">
       <div class="tab active" data-t="today">今天</div>
@@ -593,6 +597,10 @@ async function viewCourse(id) {
   if (bb) bb.onclick = () => { location.hash = `#/broken/${id}`; };
   const db2 = w.querySelector('#btnDiagrams');
   if (db2) db2.onclick = () => { location.hash = `#/diagram/${id}`; };
+  const sp = w.querySelector('#btnSpot');
+  if (sp) sp.onclick = () => { location.hash = `#/spot/${id}`; };
+  const bt = w.querySelector('#btnBatches');
+  if (bt) bt.onclick = () => { location.hash = `#/batches/${id}`; };
 
   const body = w.querySelector('#tabBody');
   if (!d.queue.total) {
@@ -1212,6 +1220,142 @@ function paintDiagram(holder, d, opts = {}) {
   holder.querySelectorAll('.dia-node.linked').forEach((n) => {
     n.onclick = () => { location.hash = `#/card/${n.dataset.card}`; };
   });
+}
+
+// ---------------- 课件批次 ----------------
+async function viewBatches(courseId) {
+  STATE.current = courseId;
+  renderSidebar();
+  const d = await api('GET', `/api/batches/${courseId}`);
+  const cname = (STATE.courses.find((x) => x.id === courseId) || {}).name || '';
+  const m = $('#main');
+  m.innerHTML = '';
+  const w = el('div', 'wrap');
+  w.innerHTML = `
+    <div class="row" style="margin-bottom:10px">
+      <button class="ghost small" id="btBack">← 返回课程</button>
+    </div>
+    <h1>课件批次 · ${esc(cname)}</h1>
+    <p class="sub">这门课导入过的所有课件。移除某一批不会删除数据，卡片只会被归档，随时能恢复。</p>
+    <div class="detail" id="btList"></div>`;
+  m.appendChild(w);
+  $('#btBack').onclick = () => { location.hash = `#/course/${courseId}`; };
+
+  const list = $('#btList');
+  if (!d.total) { list.innerHTML = '<p class="sub">这门课还没有导入过课件。</p>'; return; }
+  for (const b of d.batches) {
+    const row = el('div', 'cardrow');
+    row.innerHTML = `<span class="t">${esc(b.fileName)}</span>
+      <span class="pg">${b.kind === 'lab' ? '实验课' : '理论课'} · ${b.pages} 页 · ${b.cards} 张卡${b.active ? '' : ' · 已移除'}</span>`;
+    const btn = el('button', b.active ? 'ghost small' : 'small', b.active ? '移除' : '恢复');
+    btn.onclick = async () => {
+      if (b.active) {
+        if (!confirm(`移除「${b.fileName}」？\n这张课的 ${b.cards} 张卡会被归档，可以恢复。`)) return;
+        const r = await api('POST', `/api/batch/${b.id}/remove`, {});
+        toast(`已移除，归档 ${r.archived} 张卡`);
+      } else {
+        const r = await api('POST', `/api/batch/${b.id}/restore`, {});
+        toast(`已恢复 ${r.restored} 张卡`);
+      }
+      const b2 = await api('GET', '/api/bootstrap');
+      STATE.courses = b2.courses;
+      renderSidebar();
+      viewBatches(courseId);
+    };
+    const box = el('span');
+    box.style.marginLeft = 'auto';
+    box.appendChild(btn);
+    row.appendChild(box);
+    list.appendChild(row);
+  }
+}
+
+// ---------------- 考前抽检 ----------------
+async function viewSpot(courseId) {
+  STATE.current = courseId;
+  renderSidebar();
+  const cname = (STATE.courses.find((x) => x.id === courseId) || {}).name || '';
+  const d = await api('GET', `/api/spot/${courseId}?n=15`);
+  const m = $('#main');
+  m.innerHTML = '';
+  const w = el('div', 'wrap');
+  m.appendChild(w);
+  if (!d.total) { w.innerHTML = '<h1>考前抽检</h1><p class="sub">这门课还没有卡片。</p>'; return; }
+
+  let i = 0;
+  let revealed = false;
+  const forgotten = [];
+
+  w.innerHTML = `
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <span class="sub" id="spCount"></span>
+      <button class="ghost small" id="spQuit">结束抽检</button>
+    </div>
+    <div class="today-card exam-card">
+      <div class="ex-term" id="spFront"></div>
+      <div class="ex-ans" id="spBack"></div>
+    </div>
+    <div class="row" style="justify-content:center;margin-top:18px">
+      <button id="spShow" class="primary">看答案（空格）</button>
+      <button id="spKnow" class="small" style="display:none">还记得（←）</button>
+      <button id="spForget" class="small" style="display:none">忘了（→）</button>
+    </div>
+    <p class="sub" style="text-align:center;margin-top:12px">${esc(cname)} · 随机 15 张，含已经复习过的卡</p>`;
+
+  const paint = () => {
+    const c = d.cards[i];
+    $('#spCount').textContent = `${i + 1} / ${d.cards.length}　忘了 ${forgotten.length}`;
+    $('#spFront').textContent = c.front;
+    $('#spBack').textContent = c.back || '（没有释义）';
+    $('#spBack').style.visibility = revealed ? 'visible' : 'hidden';
+    $('#spShow').style.display = revealed ? 'none' : '';
+    $('#spKnow').style.display = revealed ? '' : 'none';
+    $('#spForget').style.display = revealed ? '' : 'none';
+  };
+
+  const answer = async (know) => {
+    const c = d.cards[i];
+    if (!know) {
+      forgotten.push(c.front);
+      await api('POST', '/api/review', { cardId: c.id, rating: 4 });
+    }
+    i += 1;
+    revealed = false;
+    if (i >= d.cards.length) return finish();
+    paint();
+  };
+
+  const finish = () => {
+    const n = d.cards.length;
+    w.innerHTML = `
+      <h1>抽检结束</h1>
+      <p class="sub">${esc(cname)} · ${n} 张</p>
+      <div class="today-card" style="text-align:center">
+        <div class="big-num">${n - forgotten.length} / ${n}</div>
+        <div class="sub">还记得 ${n - forgotten.length} 张，忘了 ${forgotten.length} 张</div>
+        ${forgotten.length ? `<p class="hint" style="margin-top:10px">忘掉的已经打回复习队列：<br>${forgotten.map(esc).join('、')}</p>` : '<p class="hint" style="margin-top:10px">全记住了，状态不错。</p>'}
+      </div>
+      <div class="row" style="justify-content:center;margin-top:16px">
+        <button id="spAgain" class="primary small">再抽一轮</button>
+        <button id="spBack" class="ghost small">回课程</button>
+      </div>`;
+    $('#spAgain').onclick = () => viewSpot(courseId);
+    $('#spBack').onclick = () => { location.hash = `#/course/${courseId}`; };
+  };
+
+  $('#spShow').onclick = () => { revealed = true; paint(); };
+  $('#spKnow').onclick = () => answer(true);
+  $('#spForget').onclick = () => answer(false);
+  $('#spQuit').onclick = () => { location.hash = `#/course/${courseId}`; };
+
+  const key = (e) => {
+    if (!document.body.contains(w)) { window.removeEventListener('keydown', key); return; }
+    if (e.key === ' ') { e.preventDefault(); if (!revealed) { revealed = true; paint(); } }
+    if (e.key === 'ArrowLeft' && revealed) answer(true);
+    if (e.key === 'ArrowRight' && revealed) answer(false);
+  };
+  window.addEventListener('keydown', key);
+  paint();
 }
 
 // ---------------- 结算 ----------------

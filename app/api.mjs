@@ -361,7 +361,45 @@ const handlers = {
     return { ok: true, ...r, queue: queueState(p.id) };
   },
 
-  // ---- 机制图 ----
+  // ---- 批次管理：这门课导过哪些课件 ----
+  'GET /api/batches/:id': (p) => {
+    const rows = db.prepare(`
+      SELECT sf.id, sf.path, sf.pages, sf.imported_at, COALESCE(sf.kind,'theory') kind,
+             COALESCE(sf.active,1) active,
+             (SELECT COUNT(*) FROM card c WHERE c.file_id=sf.id AND c.status='active' AND c.is_title=0) cards
+      FROM source_file sf WHERE sf.course_id=? ORDER BY sf.imported_at`).all(p.id);
+    return {
+      total: rows.length,
+      batches: rows.map((r) => ({ ...r, fileName: String(r.path).split(/[\\/]/).pop() })),
+    };
+  },
+  'POST /api/batch/:id/remove': (p) => {
+    const f = db.prepare('SELECT id, course_id FROM source_file WHERE id=?').get(p.id);
+    if (!f) throw new Error('这一批不存在');
+    db.prepare('UPDATE source_file SET active=0 WHERE id=?').run(p.id);
+    const n = db.prepare("UPDATE card SET status='archived' WHERE file_id=? AND status='active'").run(p.id).changes;
+    // 这批的卡从今日队列里撤掉，避免复习到已被移除的内容
+    db.prepare(`DELETE FROM daily_queue WHERE card_id IN (SELECT id FROM card WHERE file_id=?)`).run(p.id);
+    return { ok: true, archived: n };
+  },
+  'POST /api/batch/:id/restore': (p) => {
+    const f = db.prepare('SELECT id FROM source_file WHERE id=?').get(p.id);
+    if (!f) throw new Error('这一批不存在');
+    db.prepare('UPDATE source_file SET active=1 WHERE id=?').run(p.id);
+    const n = db.prepare("UPDATE card SET status='active' WHERE file_id=? AND status='archived'").run(p.id).changes;
+    return { ok: true, restored: n };
+  },
+
+  // ---- 考前抽检：全课随机抽，含已毕业的卡 ----
+  'GET /api/spot/:id': (p) => {
+    const n = Math.max(5, Math.min(100, Number(p.query?.n) || 15));
+    const rows = db.prepare(`
+      SELECT c.id, c.front, c.back, c.importance, c.source_page, COALESCE(s.state,'new') st
+      FROM card c LEFT JOIN card_state s ON s.card_id=c.id
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+      ORDER BY RANDOM() LIMIT ?`).all(p.id, n);
+    return { cards: rows, total: rows.length };
+  },
   'GET /api/diagrams/:id': (p) => {
     // 按生成顺序排（先画的是最大的那一章，放最前面）
     const rows = db.prepare('SELECT id, title, created_at FROM diagram WHERE course_id=? ORDER BY created_at')
