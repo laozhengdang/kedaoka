@@ -430,7 +430,10 @@ const DIAGRAM_SYSTEM = () => `你是${majorName()}专业的助教，要把一章
 - **箭头方向统一表示"导致 / 进而"**：疾病、病因、生理过程放上游（图的上方），
   药物、治疗手段、结果放下游（图的下方）。不要把"X 药治疗 Y 病"画成 药→病，
   要写成 Y 病（靶点）→ X 药 的"干预"关系
-- 起点放最上游（原因、前提、分类的总称），终点放最下游（结果、应用、产物）
+- **要画出链条，不要画成"一个中心发散出去的火柴棍"**：
+  每层最好 2~4 个概念，允许一条链走 3~5 层（A→B→C→D）
+- 一个概念直接连出去的下游**不超过 4 个**；如果确实有很多后果，
+  挑出最能代表"下一步"的那 3~4 个
 - 不要画出环（A→B→A）
 - 概念少于 8 个就全用上，不要硬凑
 
@@ -571,6 +574,24 @@ function buildDiagramXml(labels, edges, title) {
     const k = layer.get(l) || 0;
     if (!byLayer.has(k)) byLayer.set(k, []);
     byLayer.get(k).push(l);
+  }
+
+  // 层内排序：按前驱的平均位置排（barycenter），能把交叉显著减少
+  const order = new Map();
+  for (const [, items] of byLayer) items.forEach((l, i) => order.set(l, i));
+  const layerKeys = [...byLayer.keys()].sort((a, b) => a - b);
+  for (let pass = 0; pass < 2; pass++) {
+    for (const k of layerKeys.slice(1)) {
+      const items = byLayer.get(k);
+      const score = (l) => {
+        const preds = edges.filter((e) => e.to === l)
+          .map((e) => order.get(e.from))
+          .filter((v) => v !== undefined);
+        return preds.length ? preds.reduce((a, b) => a + b, 0) / preds.length : order.get(l);
+      };
+      items.sort((a, b) => score(a) - score(b));
+      items.forEach((l, i) => order.set(l, i));
+    }
   }
 
   const NODE_H = 44;
