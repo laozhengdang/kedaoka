@@ -1,4 +1,4 @@
-﻿// main.mjs —— 桌面版入口（Electron）
+// main.mjs —— 桌面版入口（Electron）
 // 不开本地端口、不经过浏览器：直接用 IPC 调 api.mjs，前端加载本地文件。
 
 import { app, BrowserWindow, ipcMain, shell, Menu } from 'electron';
@@ -157,6 +157,8 @@ app.whenReady().then(async () => {
     const log = [];
     try {
       const sidebar = await win.webContents.executeJavaScript(`(async () => {
+        // 关掉启动画面，否则会挡住后面的点击
+        document.querySelector('#splash')?.click();
         for (let i = 0; i < 20; i++) {
           if (document.querySelector('.course') || document.querySelector('#main .wrap')) break;
           await new Promise(r => setTimeout(r, 120));

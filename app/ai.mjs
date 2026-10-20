@@ -305,7 +305,7 @@ async function reviewTerms(cfg, terms, chunks) {
   for (const t of terms) {
     const v = byName.get(normalizeName(t.name));
     if (!v) { out.push(t); continue; }               // 没判到的保留（保守）
-    if (v.keep === false) { dropped.push(`${t.name}（${v.reason || '复核删除'}）`); continue; }
+    if (v.keep === false) { dropped.push({ name: t.name, reason: v.reason || '复核删除', page: t.page || 0 }); continue; }
     const canon = normalizeName(v.canonical || '');
     out.push({ ...t, name: canon && canon !== normalizeName(t.name) ? canon : t.name,
       aliases: [...(t.aliases || []), ...(canon && canon !== normalizeName(t.name) ? [t.name] : [])] });
@@ -724,7 +724,11 @@ async function runRefine(courseId, job) {
       } else {
         terms = rev.kept;
         if (rev.dropped.length) {
-          job.log.push(`  复核删掉 ${rev.dropped.length} 条：${rev.dropped.slice(0, 5).join('；')}`);
+          job.log.push(`  复核删掉 ${rev.dropped.length} 条：${rev.dropped.slice(0, 5).map((x) => `${x.name}（${x.reason}）`).join('；')}`);
+          // 存进待审队列，用户可以捞回来
+          const ins = db.prepare(
+            'INSERT INTO rejected_term(id,course_id,name,reason,page,created_at) VALUES(?,?,?,?,?,?)');
+          for (const d of rev.dropped) ins.run(uid('rej_'), courseId, d.name, d.reason, d.page, nowIso());
         }
         job.dropped = (job.dropped || 0) + rev.dropped.length;
       }

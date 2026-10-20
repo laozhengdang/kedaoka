@@ -1,4 +1,4 @@
-﻿// api.mjs —— 所有业务逻辑都在这里，服务端和桌面端共用同一份。
+// api.mjs —— 所有业务逻辑都在这里，服务端和桌面端共用同一份。
 // server.mjs（网页版）调 callApi；electron/main.mjs（桌面版）也调 callApi。
 
 import { spawn } from 'node:child_process';
@@ -535,6 +535,114 @@ const handlers = {
     db.prepare("UPDATE card SET status='active' WHERE id=?").run(p.id);
     db.prepare('INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?) ON CONFLICT(card_id) DO NOTHING')
       .run(p.id, 'new', nowIso());
+    return { ok: true };
+  },
+
+  // ---- 考试模式：定考试日期，倒推每天要刷多少 ----
+  'GET /api/plan/:id': (p) => {
+    const plan = db.prepare('SELECT * FROM course_plan WHERE course_id=?').get(p.id);
+    const total = db.prepare(
+      "SELECT COUNT(*) n FROM card WHERE course_id=? AND status='active' AND is_title=0").get(p.id).n;
+    const graduated = db.prepare(`
+      SELECT COUNT(*) n FROM card c JOIN card_state s ON s.card_id=c.id
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0 AND s.state='graduated'`).get(p.id).n;
+    const fourStar = db.prepare(`
+      SELECT COUNT(*) n FROM card WHERE course_id=? AND status='active' AND is_title=0
+        AND importance>=4 AND id NOT IN (SELECT card_id FROM card_state WHERE state='graduated')`).get(p.id).n;
+    return { plan: plan || null, total, graduated, fourStar, today: today() };
+  },
+  'POST /api/plan/:id': (p, b) => {
+    const examDate = String(b?.examDate || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(examDate)) throw new Error('考试日期格式不对');
+    const t = today();
+    const days = Math.max(1, Math.round((new Date(examDate) - new Date(t)) / 86400000));
+    const total = db.prepare(
+      "SELECT COUNT(*) n FROM card WHERE course_id=? AND status='active' AND is_title=0").get(p.id).n;
+    const graduated = db.prepare(`
+      SELECT COUNT(*) n FROM card c JOIN card_state s ON s.card_id=c.id
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0 AND s.state='graduated'`).get(p.id).n;
+    const remaining = Math.max(0, total - graduated);
+    const newDays = Math.max(1, Math.round(days * 0.6));   // 留 40% 天数给复习与缓冲
+    const perDay = Math.max(5, Math.ceil(remaining / newDays));
+    db.prepare(`INSERT INTO course_plan(course_id,exam_date,daily_target,created_at) VALUES(?,?,?,?)
+      ON CONFLICT(course_id) DO UPDATE SET exam_date=excluded.exam_date,
+        daily_target=excluded.daily_target, created_at=excluded.created_at`)
+      .run(p.id, examDate, perDay, nowIso());
+    if (b?.apply) setProfile(`daily_new_${p.id}`, perDay);
+    return { ok: true, days, remaining, perDay, newDays };
+  },
+  'POST /api/plan/:id/clear': (p) => {
+    db.prepare('DELETE FROM course_plan WHERE course_id=?').run(p.id);
+    return { ok: true };
+  },
+
+  // ---- 学习统计 ----
+  'GET /api/stats/:id': (p) => {
+    const days = [];
+    for (let k = 6; k >= 0; k -= 1) {
+      const d = new Date(Date.now() - k * 86400000);
+      const iso = d.toISOString().slice(0, 10);
+      days.push({
+        date: iso,
+        n: db.prepare(`
+          SELECT COUNT(*) n FROM review_log l JOIN card c ON c.id=l.card_id
+          WHERE c.course_id=? AND substr(l.ts,1,10)=?`).get(p.id, iso).n,
+      });
+    }
+    const total = db.prepare(
+      "SELECT COUNT(*) n FROM card WHERE course_id=? AND status='active' AND is_title=0").get(p.id).n;
+    const byState = db.prepare(`
+      SELECT COALESCE(s.state,'new') st, COUNT(*) n FROM card c
+      LEFT JOIN card_state s ON s.card_id=c.id
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0 GROUP BY st`).all(p.id);
+    const reviews = db.prepare(`
+      SELECT COUNT(*) n, COALESCE(SUM(COALESCE(l.latency_ms,0)),0) ms
+      FROM review_log l JOIN card c ON c.id=l.card_id WHERE c.course_id=?`).get(p.id);
+    const chapters = db.prepare(`
+      SELECT COALESCE(pg.chapter,'未分章') ch, COUNT(*) total,
+             SUM(CASE WHEN s.state='graduated' THEN 1 ELSE 0 END) grad
+      FROM card c
+      LEFT JOIN card_state s ON s.card_id=c.id
+      LEFT JOIN page pg ON pg.id = (
+        SELECT p2.id FROM page p2 WHERE p2.file_id = COALESCE(c.file_id, p2.file_id)
+          AND p2.page_no = c.source_page
+          AND p2.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
+        ORDER BY p2.id LIMIT 1)
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+      GROUP BY ch ORDER BY total DESC`).all(p.id);
+    return { days, total, byState, reviews, chapters };
+  },
+
+  // ---- 待审队列：AI 复核刷掉的候选词 ----
+  'GET /api/pending/:id': (p) => {
+    const rows = db.prepare(
+      'SELECT id, name, reason, page, created_at FROM rejected_term WHERE course_id=? ORDER BY created_at DESC LIMIT 200')
+      .all(p.id);
+    return { total: rows.length, items: rows };
+  },
+  'POST /api/pending/restore': (_p, b) => {
+    const r = db.prepare('SELECT * FROM rejected_term WHERE id=?').get(b?.itemId);
+    if (!r) throw new Error('这条不存在');
+    const exists = db.prepare("SELECT id FROM card WHERE course_id=? AND front=? AND status='active'")
+      .get(r.course_id, r.name);
+    if (!exists) {
+      const conceptId = uid('cp_');
+      db.prepare('INSERT INTO concept(id,course_id,type,created_at) VALUES(?,?,?,?)')
+        .run(conceptId, r.course_id, 'unknown', nowIso());
+      db.prepare('INSERT INTO term(concept_id,text,kind,origin) VALUES(?,?,?,?)')
+        .run(conceptId, r.name, 'preferred', 'human');
+      const cardId = uid('card_');
+      db.prepare(`INSERT INTO card(id,course_id,concept_id,front,back,image_path,source_page,source_text,
+        importance,origin,status,is_title,created_at) VALUES(?,?,?,?,?,NULL,?,?,?,'human','active',0,?)`)
+        .run(cardId, r.course_id, conceptId, r.name, '（人工捞回，释义待补）', r.page || 1, '', 3, nowIso());
+      db.prepare('INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?)')
+        .run(cardId, 'new', nowIso());
+    }
+    db.prepare('DELETE FROM rejected_term WHERE id=?').run(r.id);
+    return { ok: true };
+  },
+  'POST /api/pending/drop': (_p, b) => {
+    db.prepare('DELETE FROM rejected_term WHERE id=?').run(b?.itemId);
     return { ok: true };
   },
 

@@ -1,4 +1,4 @@
-﻿// db.mjs —— 数据库：建表 + 迁移 + 常用操作
+// db.mjs —— 数据库：建表 + 迁移 + 常用操作
 // 用 Node 24 内置的 node:sqlite，不需要编译任何原生模块。
 
 import { DatabaseSync } from 'node:sqlite';
@@ -164,6 +164,24 @@ CREATE TABLE IF NOT EXISTS exam_attempt (
   minutes INTEGER NOT NULL DEFAULT 0,
   used_sec INTEGER NOT NULL DEFAULT 0,
   answers TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
+
+-- 每门课的考试计划（考试模式用）
+CREATE TABLE IF NOT EXISTS course_plan (
+  course_id TEXT PRIMARY KEY,
+  exam_date TEXT NOT NULL,
+  daily_target INTEGER NOT NULL DEFAULT 10,
+  created_at TEXT NOT NULL
+);
+
+-- AI 复核时刷掉的候选词（待审队列：可以捞回来）
+CREATE TABLE IF NOT EXISTS rejected_term (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  reason TEXT,
+  page INTEGER,
   created_at TEXT NOT NULL
 );
 
