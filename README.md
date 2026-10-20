@@ -1,5 +1,12 @@
 # 老郑荡的妙妙小工具
 
+### 📥 [**点这里下载（Windows 免安装，解压双击即用）**](https://github.com/laozhengdang/miaomiao-study/releases/latest)
+
+> 178 MB · 不需要装 Python / Node · 数据全在本机
+> 第一次运行若提示"Windows 已保护你的电脑"，点「更多信息」→「仍要运行」（没买代码签名，正常现象）
+
+---
+
 把老师的课件（PDF）丢进去，自动整理成**能考的知识卡**，用「四档自评 + 间隔重复」复习；
 考前还能一键生成**复习清单**、**机制图**和**模拟卷**。
 
@@ -30,11 +37,11 @@
 
 ### 拿到成品
 
-> 成品包约 460MB，还没发 Release。急用就先按下面的「从源码跑」来；
-> 或者按 [docs/发布清单.md](docs/发布清单.md) 自己打一个包。
+到 [**Releases**](https://github.com/laozhengdang/miaomiao-study/releases/latest) 下载
+`miaomiao-study-v0.9.0.zip`（178 MB），解压后双击 `老郑荡的妙妙小工具.exe`。
 
-打包好的版本解压后双击 `老郑荡的妙妙小工具.exe` 即可。
-**不需要装 Python、不需要装 Node**，Python 与 PyMuPDF 已经打包在里面。
+**不需要装 Python、不需要装 Node** —— Electron 引擎、Python 3.12、PyMuPDF 全部打包在里面。
+（想自己打包发给别人，见 [docs/发布清单.md](docs/发布清单.md)。）
 
 第一次打开：左边「＋ 新建学科」→ 进这门课 →「＋ 导入课件到本学科」→ 选 PDF。
 想用 AI 功能（整理术语 / 画机制图 / 复习清单）：左栏「设置」里填一个 API Key（推荐 DeepSeek，几毛钱一份课件）。
@@ -81,7 +88,8 @@ build/老郑荡的妙妙小工具/data/
 - [页面清单](docs/页面清单.md)：产品全貌
 - [功能对照](docs/功能对照.md)：设计 vs 实现，哪些做完了、哪些还差
 - [检查清单](docs/检查清单.md)：35 项人工验收步骤
-- [发布清单](docs/发布清单.md)：发到 GitHub 前要做什么
+- [发给同学](docs/发给同学.md)：怎么把成品发给别人
+- [发布清单](docs/发布清单.md)：发版前要做什么
 
 ---
 
