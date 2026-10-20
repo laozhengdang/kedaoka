@@ -146,6 +146,14 @@ CREATE TABLE IF NOT EXISTS diagram (
   created_at TEXT NOT NULL
 );
 
+-- 卡片 ↔ 机制图：一张图可以服务多个概念，一个概念也可以配多张图
+CREATE TABLE IF NOT EXISTS card_diagram (
+  card_id TEXT NOT NULL,
+  diagram_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (card_id, diagram_id)
+);
+
 -- P-1 学习偏好：全局，跨课程
 CREATE TABLE IF NOT EXISTS profile (key TEXT PRIMARY KEY, value TEXT);
 `;

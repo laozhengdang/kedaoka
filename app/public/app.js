@@ -762,11 +762,23 @@ function renderCard() {
       <div class="term">${esc(c.front)}</div>
       <div class="meta">第 ${c.source_page} 页 · ${stars(c.importance)}</div>
       <div class="answer"><div class="label">课件原文</div>${esc(c.back || '（这一页没有抽到上下文）')}</div>
+      <div id="revDia"></div>
       ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" alt="配图" loading="lazy"></div>` : ''}
       <div class="row" style="justify-content:center;margin-top:26px">
         <button class="primary" id="btnNext">下一张 <span class="kbd">空格</span></button>
       </div>`;
     $('#btnNext').onclick = nextCard;
+    // 这张卡挂了机制图就画在释义下面（最多两张，别把屏幕占满）
+    const shelf = $('#revDia');
+    for (const dg of (c.diagrams || []).slice(0, 2)) {
+      const holder = el('div', 'rev-dia');
+      const cap = el('div', 'sub', dg.title);
+      holder.appendChild(cap);
+      const canvas = el('div');
+      holder.appendChild(canvas);
+      shelf.appendChild(holder);
+      api('GET', `/api/diagram/${dg.id}`).then((data) => paintDiagram(canvas, data, { scale: 0.8 }));
+    }
   }
   playEnter(inner);
 }
@@ -1044,69 +1056,70 @@ async function importDiagram(courseId) {
 async function renderDiagram(diagramId) {
   const holder = $('#diaStageHolder');
   const d = await api('GET', `/api/diagram/${diagramId}`);
-  if (!d.nodes.length) {
-    holder.innerHTML = '<p class="sub">这张图里没解析出节点（可能不是流程图）。</p>';
+  paintDiagram(holder, d, {});
+}
+
+// 把一张机制图画进任意容器（页面 / 卡片释义 / 复习背面都用它）
+function paintDiagram(holder, d, opts = {}) {
+  if (!holder) return;
+  if (!d.nodes || !d.nodes.length) {
+    holder.innerHTML = '<p class="sub">这张图里没解析出节点。</p>';
     return;
   }
   const pad = 24;
   const minX = Math.min(...d.nodes.map((n) => n.x)) - pad;
   const minY = Math.min(...d.nodes.map((n) => n.y)) - pad;
-  const maxX = Math.max(...d.nodes.map((n) => n.x + n.w)) + pad;
-  const maxY = Math.max(...d.nodes.map((n) => n.y + n.h)) + pad;
-  const W = maxX - minX;
-  const H = maxY - minY;
+  const W = Math.max(...d.nodes.map((n) => n.x + n.w)) + pad - minX;
+  const H = Math.max(...d.nodes.map((n) => n.y + n.h)) + pad - minY;
 
   const byId = new Map(d.nodes.map((n) => [n.id, n]));
   const paths = [];
-  for (const e of d.edges) {
+  for (const e of (d.edges || [])) {
     const a = byId.get(e.source);
     const b = byId.get(e.target);
     if (!a || !b) continue;
     const ax = a.x + a.w / 2, ay = a.y + a.h;
     const bx = b.x + b.w / 2, by = b.y;
-    // 竖直就直连，横向错开就拐一个弯（够用）
-    let dPath;
-    if (Math.abs(ax - bx) < 8) dPath = `M ${ax} ${ay} L ${bx} ${by}`;
+    let p;
+    if (Math.abs(ax - bx) < 8) p = `M ${ax} ${ay} L ${bx} ${by}`;
     else {
       const my = (ay + by) / 2;
-      dPath = `M ${ax} ${ay} L ${ax} ${my} L ${bx} ${my} L ${bx} ${by}`;
+      p = `M ${ax} ${ay} L ${ax} ${my} L ${bx} ${my} L ${bx} ${by}`;
     }
-    paths.push(`<path d="${dPath}" fill="none" stroke="var(--edge)" stroke-width="1.4"
-      ${e.dashed ? 'stroke-dasharray="5 4"' : ''} marker-end="url(#arrow)"/>`);
+    paths.push(`<path d="${p}" fill="none" stroke="var(--edge)" stroke-width="1.4"
+      ${e.dashed ? 'stroke-dasharray="5 4"' : ''} marker-end="url(#arrow-${d.diagram ? d.diagram.id : 'x'})"/>`);
   }
+  const mid = `arrow-${(d.diagram && d.diagram.id) || 'x'}`;
 
   const nodesHtml = d.nodes.map((n) => {
     const cls = 'dia-node' + (n.cardId ? ' linked' : '');
     const style = `left:${n.x - minX}px;top:${n.y - minY}px;width:${n.w}px;height:${n.h}px;` +
       `background:${n.fill};border-color:${n.stroke};border-radius:${n.rounded ? 8 : 3}px;` +
       `font-size:${n.fontSize}px;${n.bold ? 'font-weight:600;' : ''}`;
-    return `<div class="${cls}" style="${style}" data-card="${n.cardId}" title="${n.cardId ? '点开这张卡' : '没有对应卡片'}">${esc(n.text)}</div>`;
+    return `<div class="${cls}" style="${style}" data-card="${n.cardId || ''}">${esc(n.text)}</div>`;
   }).join('');
 
   holder.innerHTML = `
-    <div class="dia-wrap" id="diaWrap">
-      <div class="dia-stage" id="diaStage" style="width:${W}px;height:${H}px">
+    <div class="dia-wrap">
+      <div class="dia-stage" style="width:${W}px;height:${H}px">
         <svg class="dia-edges" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-          <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+          <defs><marker id="${mid}" viewBox="0 0 10 10" refX="9" refY="5"
             markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--edge)"/></marker></defs>
           ${paths.join('')}
         </svg>
         ${nodesHtml}
       </div>
-    </div>
-    <p class="sub" style="margin-top:10px">带下划线的节点可以点，跳到对应卡片。</p>`;
+    </div>`;
 
-  const scale = () => {
-    const wrap = $('#diaWrap');
-    const stage = $('#diaStage');
-    if (!wrap || !stage) return;
-    const k = Math.min(1, (wrap.clientWidth - 4) / W);
+  const wrap = holder.querySelector('.dia-wrap');
+  const stage = holder.querySelector('.dia-stage');
+  const fit = () => {
+    const k = Math.min(1, (wrap.clientWidth - 2) / W) * (opts.scale || 1);
     stage.style.transform = `scale(${k})`;
     wrap.style.height = `${H * k}px`;
   };
-  scale();
-  window.addEventListener('resize', scale, { once: true });
+  requestAnimationFrame(fit);
 
   holder.querySelectorAll('.dia-node.linked').forEach((n) => {
     n.onclick = () => { location.hash = `#/card/${n.dataset.card}`; };
@@ -1291,6 +1304,11 @@ async function viewCard(id) {
       <div class="term">${esc(c.front)}</div>
       <div class="meta">${stars(c.importance)} · 第 ${c.source_page} 页 · ${c.st}</div>
       <div class="body" id="cardBody">${esc(c.back)}</div>
+      <div id="cardDia"></div>
+      <div id="diaPickBox" style="margin-top:6px">
+        <button id="btnAttachDia" class="ghost small">＋ 给这张卡挂一张机制图</button>
+        <div id="diaPickList" class="hidden" style="margin-top:8px"></div>
+      </div>
       ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" alt="配图" loading="lazy"></div>` : ''}
       ${d.samePage.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">同一页的其他概念</div>
         ${d.samePage.map((x) => `<a data-go="${x.id}">${esc(x.front)}</a>`).join(' · ')}</div>` : ''}
@@ -1322,6 +1340,56 @@ async function viewCard(id) {
   });
   const backBtn = $('#btnBack');
   if (backBtn) backBtn.onclick = () => { location.hash = `#/browse/${c.course_id}`; };
+
+  // 机制图：挂在释义下面；没有就显示一个"挂一张"的入口
+  const diaBox = $('#cardDia');
+  if (d.diagrams && d.diagrams.length) {
+    diaBox.innerHTML = '<div class="sub" style="margin:16px 0 8px">机制图</div>';
+    for (const dg of d.diagrams) {
+      const one = el('div', 'card-dia');
+      const head = el('div', 'row');
+      head.style.justifyContent = 'space-between';
+      head.innerHTML = `<span class="sub">${esc(dg.title)}</span>`;
+      const rm = el('button', 'ghost small', '移除');
+      rm.onclick = async () => {
+        await api('POST', `/api/card/${c.id}/diagram-remove`, { diagramId: dg.id });
+        toast('已移除');
+        viewCard(c.id);
+      };
+      head.appendChild(rm);
+      one.appendChild(head);
+      const holder = el('div');
+      one.appendChild(holder);
+      diaBox.appendChild(one);
+      api('GET', `/api/diagram/${dg.id}`).then((data) => paintDiagram(holder, data, { scale: 0.92 }));
+    }
+  }
+
+  $('#btnAttachDia').onclick = async () => {
+    const box = $('#diaPickList');
+    box.classList.toggle('hidden');
+    if (box.classList.contains('hidden')) return;
+    const list = await api('GET', `/api/diagrams/${c.course_id}`);
+    box.innerHTML = '';
+    if (!list.total) {
+      box.innerHTML = '<p class="sub">这门课还没有机制图。到课程页「机制图」里导入 .drawio 文件。</p>';
+      return;
+    }
+    for (const dg of list.diagrams) {
+      if ((d.diagrams || []).some((x) => x.id === dg.id)) continue;
+      const row = el('div', 'cardrow');
+      row.innerHTML = `<span class="t">${esc(dg.title)}</span>`;
+      const add = el('button', 'small', '挂上');
+      add.onclick = async () => {
+        await api('POST', `/api/card/${c.id}/diagram`, { diagramId: dg.id });
+        toast('已挂上');
+        viewCard(c.id);
+      };
+      row.appendChild(add);
+      box.appendChild(row);
+    }
+    if (!box.children.length) box.innerHTML = '<p class="sub">这门课的图都挂过了</p>';
+  };
   $('#btnEdit').onclick = () => $('#editor').classList.toggle('hidden');
   $('#eCancel').onclick = () => $('#editor').classList.add('hidden');
   $('#eSave').onclick = async () => {

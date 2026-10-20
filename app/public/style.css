@@ -437,3 +437,11 @@ html[data-theme="dark"] { --edge: #5b6270; }
 }
 .dia-node.linked:hover { box-shadow: 0 0 0 2px var(--accent-soft); border-color: var(--accent); }
 html[data-theme="dark"] .dia-node { color: #e7e7e3; }
+
+/* 卡片释义下方的机制图 */
+.rev-dia, .card-dia {
+  margin: 16px auto 0; max-width: 620px;
+  border-top: 1px dashed var(--line); padding-top: 10px;
+}
+.card-dia { max-width: 100%; }
+.rev-dia .sub { margin-bottom: 6px; }

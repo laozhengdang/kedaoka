@@ -124,6 +124,21 @@ function parseDiagramEdges(xml) {
   return edges;
 }
 
+// 把机制图里的节点文字和这门课的卡片对上，建立 card_diagram 关联
+function linkDiagramToCards(diagramId, courseId, xml) {
+  const norm = (s) => String(s || '').replace(/[\s\u3000（）()·、，,。:：]/g, '');
+  const stripNote = (s) => String(s || '').replace(/[（(][^）)]*[）)]/g, '');
+  const cards = db.prepare("SELECT id, front FROM card WHERE course_id=? AND status='active'").all(courseId);
+  const byText = new Map(cards.map((c) => [norm(c.front), c.id]));
+  const ins = db.prepare('INSERT OR IGNORE INTO card_diagram(card_id,diagram_id,created_at) VALUES(?,?,?)');
+  let n = 0;
+  for (const node of parseDiagramNodes(xml)) {
+    const cid = byText.get(norm(stripNote(node.text)));
+    if (cid) { ins.run(cid, diagramId, nowIso()); n += 1; }
+  }
+  return n;
+}
+
 // ---------- 排程（简化版 SM-2，见文档 D19 / D13） ----------
 export function schedule(cardId, rating, auto = 0) {
   const row = db.prepare('SELECT * FROM card_state WHERE card_id=?').get(cardId)
@@ -247,6 +262,22 @@ export function queueState(courseId) {
       AND c.id NOT IN (SELECT card_id FROM daily_queue WHERE course_id=? AND date=?)`)
     .get(courseId, courseId, date).n;
 
+  // 每张卡挂了哪些机制图（翻卡时显示在释义下面）
+  const ids = rows.map((r) => r.card_id);
+  if (ids.length) {
+    const marks = ids.map(() => '?').join(',');
+    const rels = db.prepare(`
+      SELECT cd.card_id, d.id, d.title FROM card_diagram cd
+      JOIN diagram d ON d.id = cd.diagram_id
+      WHERE cd.card_id IN (${marks}) ORDER BY cd.created_at`).all(...ids);
+    const map = new Map();
+    for (const r of rels) {
+      if (!map.has(r.card_id)) map.set(r.card_id, []);
+      map.get(r.card_id).push({ id: r.id, title: r.title });
+    }
+    for (const r of rows) r.diagrams = map.get(r.card_id) || [];
+  }
+
   return { date, round, total: rows.length, done: rows.filter((r) => r.done).length, left, cards: rows };
 }
 
@@ -327,7 +358,9 @@ const handlers = {
     const id = uid('dia_');
     db.prepare('INSERT INTO diagram(id,course_id,title,xml,created_at) VALUES(?,?,?,?,?)')
       .run(id, p.id, title, xml, nowIso());
-    return { ok: true, id, title };
+    // 导进来就顺手把"节点文字对得上的卡片"挂上，省得一张张手动挂
+    const linked = linkDiagramToCards(id, p.id, xml);
+    return { ok: true, id, title, linked };
   },
   'GET /api/diagram/:id': (p) => {
     const d = db.prepare('SELECT * FROM diagram WHERE id=?').get(p.id);
@@ -499,7 +532,25 @@ const handlers = {
     const logs = db.prepare('SELECT ts,rating,auto FROM review_log WHERE card_id=? ORDER BY ts DESC LIMIT 5').all(p.id);
     const samePage = db.prepare('SELECT id,front,importance FROM card WHERE course_id=? AND source_page=? AND id<>? LIMIT 8')
       .all(c.course_id, c.source_page, p.id);
-    return { card: c, relations: rels, logs, samePage, source };
+    // 这张卡配了哪些机制图（翻卡时显示在释义下面）
+    const diagrams = db.prepare(`
+      SELECT d.id, d.title FROM card_diagram cd JOIN diagram d ON d.id=cd.diagram_id
+      WHERE cd.card_id=? ORDER BY cd.created_at`).all(p.id);
+    return { card: c, relations: rels, logs, samePage, source, diagrams };
+  },
+
+  // 手动挂 / 摘机制图
+  'POST /api/card/:id/diagram': (p, b) => {
+    const did = String(b?.diagramId || '');
+    if (!did) throw new Error('缺少 diagramId');
+    db.prepare('INSERT OR IGNORE INTO card_diagram(card_id,diagram_id,created_at) VALUES(?,?,?)')
+      .run(p.id, did, nowIso());
+    return { ok: true };
+  },
+  'POST /api/card/:id/diagram-remove': (p, b) => {
+    db.prepare('DELETE FROM card_diagram WHERE card_id=? AND diagram_id=?')
+      .run(p.id, String(b?.diagramId || ''));
+    return { ok: true };
   },
 
   'POST /api/card/:id': (p, b) => {

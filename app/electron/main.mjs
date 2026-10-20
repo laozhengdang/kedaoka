@@ -303,6 +303,18 @@ app.whenReady().then(async () => {
         })()`);
         const shot3 = await win.webContents.capturePage();
         writeFileSync(join(process.env.MIAOMIAO_DATA || '.', 'shot-diagram.png'), shot3.toPNG());
+
+        // 卡片释义 + 机制图
+        const { db: dbase } = await import('../db.mjs');
+        const cardId = dbase.prepare('SELECT card_id FROM card_diagram LIMIT 1').get()?.card_id;
+        if (cardId) {
+          await win.webContents.executeJavaScript(`(async () => {
+            location.hash = '#/card/${cardId}';
+            await new Promise(r => setTimeout(r, 1100));
+          })()`);
+          const shot4 = await win.webContents.capturePage();
+          writeFileSync(join(process.env.MIAOMIAO_DATA || '.', 'shot-card.png'), shot4.toPNG());
+        }
       } catch { /* noop */ }
       try {
         const { writeFileSync } = await import('node:fs');
