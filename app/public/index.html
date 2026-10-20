@@ -152,6 +152,26 @@
   </div>
 </div>
 
+<!-- 全局检索 Ctrl+K -->
+<div id="searchModal" class="modal hidden">
+  <div class="modal-box" style="width:640px">
+    <input id="searchQ" placeholder="搜全库的术语（跨所有课程）…">
+    <div id="searchList" class="detail" style="margin-top:10px;max-height:52vh;overflow:auto"></div>
+    <p class="hint">回车打开第一条 · Esc 关闭</p>
+  </div>
+</div>
+
+<!-- 关于 -->
+<div id="aboutModal" class="modal hidden">
+  <div class="modal-box" style="width:520px">
+    <h3>关于</h3>
+    <div class="detail" id="aboutBody"></div>
+    <div class="row" style="margin-top:12px">
+      <button id="aboutClose" class="ghost">关闭</button>
+    </div>
+  </div>
+</div>
+
 <script src="./app.js"></script>
 </body>
 </html>

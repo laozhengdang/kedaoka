@@ -362,6 +362,19 @@ const handlers = {
     return { ok: true, ...r, queue: queueState(p.id) };
   },
 
+  // 全局检索：跨课程找术语（Ctrl+K）
+  'GET /api/search': (p) => {
+    const q = String(p.query?.q || '').trim();
+    if (!q) return { total: 0, hits: [] };
+    const rows = db.prepare(`
+      SELECT c.id, c.front, c.back, c.importance, c.source_page, co.name AS course, co.id AS course_id
+      FROM card c JOIN course co ON co.id=c.course_id
+      WHERE c.status='active' AND c.is_title=0 AND (c.front LIKE ? OR c.back LIKE ?)
+      ORDER BY CASE WHEN c.front LIKE ? THEN 0 ELSE 1 END, c.importance DESC
+      LIMIT 30`).all(`%${q}%`, `%${q}%`, `${q}%`);
+    return { total: rows.length, hits: rows };
+  },
+
   // ---- 批次管理：这门课导过哪些课件 ----
   'GET /api/batches/:id': (p) => {
     const rows = db.prepare(`

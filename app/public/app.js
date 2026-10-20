@@ -398,6 +398,59 @@ function bindChrome() {
   $('#importGo').onclick = doImport;
   $('#importPick').onclick = pickImportFile;
   bindDragDrop();
+  bindSearch();
+  $('#aboutClose').onclick = () => $('#aboutModal').classList.add('hidden');
+}
+
+// ---------- 全局检索（Ctrl+K） ----------
+function bindSearch() {
+  const open = () => {
+    $('#searchModal').classList.remove('hidden');
+    $('#searchQ').value = '';
+    $('#searchList').innerHTML = '<p class="sub">输入关键词，跨所有课程搜索</p>';
+    $('#searchQ').focus();
+  };
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); open(); }
+    if (e.key === 'Escape') $('#searchModal').classList.add('hidden');
+  });
+  const run = debounce(async () => {
+    const q = $('#searchQ').value.trim();
+    const box = $('#searchList');
+    if (!q) { box.innerHTML = '<p class="sub">输入关键词</p>'; return; }
+    const d = await api('GET', `/api/search?q=${encodeURIComponent(q)}`);
+    box.innerHTML = '';
+    if (!d.total) { box.innerHTML = '<p class="sub">没搜到</p>'; return; }
+    for (const h of d.hits) {
+      const row = el('div', 'cardrow');
+      row.innerHTML = `<span class="t">${esc(h.front)}</span>
+        <span class="pg">${esc(h.course)} · 第 ${h.source_page} 页</span>`;
+      row.onclick = () => {
+        $('#searchModal').classList.add('hidden');
+        location.hash = `#/card/${h.id}`;
+      };
+      box.appendChild(row);
+    }
+  }, 200);
+  $('#searchQ').oninput = run;
+  $('#searchQ').onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      const first = $('#searchList .cardrow');
+      if (first) first.click();
+    }
+  };
+}
+
+function showAbout() {
+  const b = $('#aboutBody');
+  b.innerHTML = `
+    <p><b>老郑荡的妙妙小工具</b> · v1</p>
+    <p class="sub">课件 → 知识卡 → 间隔重复复习。所有数据都在本机，不上传。</p>
+    <p class="sub">GitHub：github.com/laozhengdang（开源版是空白工具，课程数据不在仓库里）</p>
+    <p class="sub">技术：Electron + node:sqlite + Python(PyMuPDF) + 任意 OpenAI 兼容接口</p>
+    <p class="sub">许可：个人自用，未附许可证文件；引用第三方：Electron(MIT)、PyMuPDF(AGPL)、MuPDF(AGPL)</p>
+    <p class="sub">名言库 / 启动图：尚未实现</p>`;
+  $('#aboutModal').classList.remove('hidden');
 }
 
 // ---------- 选文件 / 拖文件 ----------
@@ -1271,15 +1324,32 @@ async function viewBatches(courseId) {
 }
 
 // ---------------- 考前抽检 ----------------
-async function viewSpot(courseId) {
+async function viewSpot(courseId, count) {
   STATE.current = courseId;
   renderSidebar();
   const cname = (STATE.courses.find((x) => x.id === courseId) || {}).name || '';
-  const d = await api('GET', `/api/spot/${courseId}?n=15`);
   const m = $('#main');
   m.innerHTML = '';
   const w = el('div', 'wrap');
   m.appendChild(w);
+
+  // 先让用户选抽多少张
+  if (!count) {
+    w.innerHTML = `
+      <h1>考前抽检 · ${esc(cname)}</h1>
+      <p class="sub">从全课随机抽题，含已经复习过的卡。忘了的会打回复习队列。</p>
+      <div class="row" style="margin-top:16px">
+        <button class="primary small" data-n="5">抽 5 张（几分钟）</button>
+        <button class="primary small" data-n="15">抽 15 张</button>
+        <button class="primary small" data-n="30">抽 30 张（模拟一整场）</button>
+      </div>`;
+    w.querySelectorAll('[data-n]').forEach((b) => {
+      b.onclick = () => viewSpot(courseId, Number(b.dataset.n));
+    });
+    return;
+  }
+
+  const d = await api('GET', `/api/spot/${courseId}?n=${count}`);
   if (!d.total) { w.innerHTML = '<h1>考前抽检</h1><p class="sub">这门课还没有卡片。</p>'; return; }
 
   let i = 0;
@@ -1339,7 +1409,7 @@ async function viewSpot(courseId) {
         <button id="spAgain" class="primary small">再抽一轮</button>
         <button id="spBack" class="ghost small">回课程</button>
       </div>`;
-    $('#spAgain').onclick = () => viewSpot(courseId);
+    $('#spAgain').onclick = () => viewSpot(courseId, count);
     $('#spBack').onclick = () => { location.hash = `#/course/${courseId}`; };
   };
 
@@ -1713,8 +1783,12 @@ async function viewSettings() {
     </div>
     <div class="row" style="margin-top:16px">
       <button id="pSave" class="primary">保存</button>
+    </div>
+    <h2>关于</h2>
+    <div class="detail">
+      <div class="row"><button id="btnAbout" class="small">版本与说明</button></div>
     </div>`;
-  m.appendChild(w);  $('#pSave').onclick = async () => {
+  m.appendChild(w);  $('#btnAbout').onclick = () => showAbout();  $('#pSave').onclick = async () => {
     await api('POST', '/api/settings', {
       daily_new_max: Number($('#pNew').value) || 10,
       daily_review_max: Number($('#pRev').value) || 5,

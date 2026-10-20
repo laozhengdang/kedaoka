@@ -610,12 +610,24 @@ function buildDiagramXml(labels, edges, title) {
   };
 
   let y = 30;
+  const MAX_ROW_W = 1000;   // 一行最宽多少像素，超了就换行
   for (const k of layers) {
     const items = byLayer.get(k);
-    const rows = chunk(items, PER_ROW);
+    // 按实际宽度装箱：能并排就并排，不再死守 4 个
+    const rows = [];
+    let cur = [];
+    let curW = 0;
+    for (const l of items) {
+      const wId = widthOf(l);
+      const add = cur.length ? COL_GAP + wId : wId;
+      if (cur.length && curW + add > MAX_ROW_W) { rows.push(cur); cur = []; curW = 0; }
+      cur.push(l);
+      curW += cur.length === 1 ? wId : add;
+    }
+    if (cur.length) rows.push(cur);
+
     for (const row of rows) {
       const widths = row.map(widthOf);
-      const totalW = widths.reduce((a, b) => a + b, 0) + COL_GAP * (row.length - 1);
       let x = 40;
       row.forEach((l, i) => {
         pos[l] = { x, y, w: widths[i], h: NODE_H };
