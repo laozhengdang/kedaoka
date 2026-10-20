@@ -381,3 +381,34 @@ html[data-theme="dark"] .outline b { color: #fff; }
 }
 #profPick { font-size: 12px; color: var(--ink); }
 html[data-theme="dark"] #profPick { background: #23262c; color: var(--ink); }
+
+/* ---------- 专注计时器（独占全屏） ---------- */
+#focusScreen {
+  position: fixed; inset: 0; z-index: 90;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+}
+#focusScreen.hidden { display: none; }
+.focus-inner { text-align: center; }
+.focus-clock {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: clamp(72px, 18vw, 220px); line-height: 1;
+  letter-spacing: .02em; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.focus-msg {
+  margin-top: 18px; min-height: 30px;
+  font-family: var(--serif); font-size: 20px; color: var(--muted);
+}
+.focus-msg.hit { color: var(--accent); font-size: 24px; }
+.focus-btns { margin-top: 34px; display: flex; gap: 14px; justify-content: center; }
+.focus-btn {
+  padding: 12px 30px; border-radius: 999px; font: inherit; font-size: 16px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
+}
+.focus-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.focus-tip { margin-top: 26px; font-size: 12px; color: var(--muted); }
+
+/* 背景图（自定义主题） */
+body.has-bg { background-size: cover; background-position: center; background-attachment: fixed; }
+body.has-bg #app { background: color-mix(in srgb, var(--bg) 82%, transparent); }

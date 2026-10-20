@@ -1,4 +1,4 @@
-// ai.mjs —— 接大模型：配置、调用、把逐页原文变成"术语 + 定义 + 关系"
+﻿// ai.mjs —— 接大模型：配置、调用、把逐页原文变成"术语 + 定义 + 关系"
 //
 // 设计要点（对应文档 D61 / D82）：
 //   - 只支持 OpenAI 兼容的 /chat/completions，DeepSeek / Kimi / 智谱 / OpenAI 都能填
@@ -100,7 +100,26 @@ export async function testConnection() {
 }
 
 // ---------------- 提示词 ----------------
-const SYSTEM = `你是中国农业大学动物医学专业的助教，负责把课件原文整理成"能考"的复习卡片。
+// 专业方向会改变提示词：兽医学/草业/动科 各自举的例子不一样，
+// 否则模型会把"动物医学"的常识硬套到草业课上。
+const MAJOR_HINT = {
+  兽医学: '疾病、病变、药物、免疫、病原、诊断',
+  草业科学: '牧草、草地、放牧、刈割、分蘖、粗蛋白、干草调制、草地退化、载畜量',
+  动物科学: '饲料、营养、消化率、料肉比、日增重、繁殖、育种、畜舍环境',
+  动物医学: '疾病、病变、药物、免疫、病原、诊断',
+};
+
+function majorName() {
+  const p = getProfile().profession || '兽医学';
+  return String(p);
+}
+
+function majorHint() {
+  return MAJOR_HINT[majorName()] || MAJOR_HINT.兽医学;
+}
+
+const SYSTEM = () => `你是中国农业大学${majorName()}专业的助教，负责把课件原文整理成"能考"的复习卡片。
+本课程属于${majorName()}，判断"是不是术语"时请以${majorHint()}这类概念为准，不要套用别的专业。
 只输出 JSON，不要解释，不要 Markdown 代码块。
 
 【抽什么】
@@ -115,7 +134,7 @@ const SYSTEM = `你是中国农业大学动物医学专业的助教，负责把�
 - 整句话、页码、人名、书名
 
 【要抽的（容易漏）】
-- 药物作用：祛痰作用、缓泻作用、制酵作用、健胃作用、收敛作用 —— 这些就是药理考点
+- 作用/功能类的词：祛痰作用、缓泻作用、制酵作用、健胃作用、收敛作用 —— 这些就是考点
 
 【名字要求】
 必须是原文里**完整出现**的词，不能多字也不能少字：原文是"克隆"就不能写成"为克隆"。
@@ -185,7 +204,8 @@ function mockReply(messages) {
 // ---------------- 复核（第二道工序） ----------------
 // 抽取是"宁多勿漏"的初筛，复核是"把它当考试判卷"：
 // 逐条判断是不是专业术语、要不要留、名字该叫什么。
-const REVIEW_SYSTEM = `你是动物医学专业的出题老师，正在审核一份"复习术语清单"。
+const REVIEW_SYSTEM = () => `你是${majorName()}专业的出题老师，正在审核一份"复习术语清单"。
+这门课属于${majorName()}，判断"会不会考"时以${majorHint()}这类内容为准。
 清单是一段课件里的候选词。请逐条判断：**这个词，考试会不会考**？会考就留。
 
 【留（keep=true）——只要考试问得出来就留】
@@ -218,7 +238,7 @@ async function reviewTerms(cfg, terms, chunks) {
   const pageBits = chunks.map((c) => `【第 ${c.page_no ?? c.page} 页】${String(c.text || '').slice(0, 500)}`).join('\n');
   const list = terms.map((t, i) => `${i + 1}. ${t.name}`).join('\n');
   const { text } = await chat(cfg, [
-    { role: 'system', content: REVIEW_SYSTEM },
+    { role: 'system', content: REVIEW_SYSTEM() },
     { role: 'user', content: `候选词：\n${list}\n\n它们出自这些页：\n${pageBits}\n\n请输出 JSON。` },
   ], { maxTokens: 1500, temperature: 0 });
   const parsed = parseJson(text);
@@ -256,7 +276,8 @@ export function getSavedOutline(courseId) {
   return r ? { content: r.content, createdAt: r.created_at } : { content: '', createdAt: '' };
 }
 
-const OUTLINE_SYSTEM = `你是动物医学专业的助教，正在给学生写"考前必备清单"。
+const OUTLINE_SYSTEM = () => `你是${majorName()}专业的助教，正在给学生写"考前必备清单"。
+这门课属于${majorName()}，组织术语的先后顺序请按${majorHint()}的逻辑来。
 给你一门课的全部术语（按章节分组，每个词后面是课件里的解释）。
 请写一份可以直接打印背的复习清单，要求：
 
@@ -300,7 +321,7 @@ export function startOutline(courseId) {
       text += '\n';
     }
     const { text: out } = await chatText(cfg, [
-      { role: 'system', content: OUTLINE_SYSTEM },
+      { role: 'system', content: OUTLINE_SYSTEM() },
       { role: 'user', content: text.slice(0, 24000) },
     ], { maxTokens: 4000 });
     job.content = out;
@@ -378,7 +399,7 @@ async function runRefine(courseId, job) {
     let parsed = null;
     for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
       const { text, cached } = await chat(cfg, [
-        { role: 'system', content: SYSTEM },
+        { role: 'system', content: SYSTEM() },
         { role: 'user', content: buildUserPrompt(chunk) },
       ], { maxTokens: 2200 });
       parsed = parseJson(text);

@@ -59,6 +59,35 @@ ipcMain.handle('open-external', async (_e, url) => {
 // 把库里的相对图片路径变成能直接放进 <img src> 的 file:// 地址
 ipcMain.handle('data-dir', async () => process.env.MIAOMIAO_DATA || '.');
 
+// 独占全屏（专注计时器用）
+ipcMain.handle('set-fullscreen', async (_e, on) => {
+  if (win) win.setFullScreen(Boolean(on));
+  return { ok: true, fullscreen: Boolean(on) };
+});
+
+// 选背景图：返回绝对路径
+ipcMain.handle('pick-image', async () => {
+  const { dialog } = await import('electron');
+  const r = await dialog.showOpenDialog(win || undefined, {
+    title: '选一张背景图',
+    properties: ['openFile'],
+    filters: [{ name: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }],
+  });
+  return r.canceled ? [] : r.filePaths;
+});
+
+// 把选中的背景图复制进 data/backgrounds，返回库内相对路径
+ipcMain.handle('import-background', async (_e, srcPath) => {
+  const { copyFileSync, mkdirSync } = await import('node:fs');
+  const { join, basename } = await import('node:path');
+  const dir = join(process.env.MIAOMIAO_DATA || '.', 'backgrounds');
+  mkdirSync(dir, { recursive: true });
+  const name = `${Date.now()}_${basename(String(srcPath)).replace(/[\\/:*?"<>|]/g, '_')}`;
+  const dst = join(dir, name);
+  copyFileSync(srcPath, dst);
+  return `backgrounds/${name}`;
+});
+
 // 原生文件选择器：返回绝对路径
 ipcMain.handle('pick-files', async () => {
   const { dialog } = await import('electron');
@@ -108,11 +137,18 @@ app.whenReady().then(async () => {
     await win.loadFile(join(PUBLIC, 'index.html'));
     const log = [];
     try {
-      const sidebar = await win.webContents.executeJavaScript(
-        'document.querySelectorAll(".course").length');
+      const sidebar = await win.webContents.executeJavaScript(`(async () => {
+        for (let i = 0; i < 20; i++) {
+          if (document.querySelector('.course') || document.querySelector('#main .wrap')) break;
+          await new Promise(r => setTimeout(r, 120));
+        }
+        return document.querySelectorAll('.course').length;
+      })()`);
       log.push(`课程条数: ${sidebar}`);
       const r1 = await win.webContents.executeJavaScript(`(async () => {
-        document.querySelector('.course').click();
+        const first = document.querySelector('.course');
+        if (first) first.click();
+        else if (window.STATE && STATE.courses && STATE.courses[0]) location.hash = '#/course/' + STATE.courses[0].id;
         await new Promise(r => setTimeout(r, 700));
         return (document.body.innerText || '').slice(0, 160);
       })()`);
@@ -240,6 +276,19 @@ app.whenReady().then(async () => {
         return JSON.stringify({ panel: panel.replace(/\\n/g, ' | ').slice(0, 160) });
       })()`);
       log.push('AI 面板: ' + r10);
+      // 专注计时器外观
+      try {
+        const { writeFileSync } = await import('node:fs');
+        await win.webContents.executeJavaScript(`(async () => {
+          location.hash = '#/';
+          document.querySelector('#btnTimer').click();
+          document.querySelector('#focusToggle').click();
+          await new Promise(r => setTimeout(r, 1200));
+        })()`);
+        const shot2 = await win.webContents.capturePage();
+        writeFileSync(join(process.env.MIAOMIAO_DATA || '.', 'shot-focus.png'), shot2.toPNG());
+        await win.webContents.executeJavaScript("document.querySelector('#focusExit').click()");
+      } catch { /* noop */ }
       try {
         const { writeFileSync } = await import('node:fs');
         const shot = await win.webContents.capturePage();

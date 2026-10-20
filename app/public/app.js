@@ -68,63 +68,197 @@ function renderSidebar() {
 }
 
 // ---------------- 第一栏：工具 ----------------
-const FOCUS = { running: false, t0: 0, acc: 0 };
+const FOCUS = { running: false, t0: 0, acc: 0, milestones: [], full: false };
 
 function bindTools() {
-  // 独立计时器：左键开始/暂停，右键清零
+  // 独立计时器：点一下进入独占全屏的专注界面
   const btn = $('#btnTimer');
   const text = $('#timerText');
   const hint = $('#timerHint');
-  const paint = () => {
+  const paintClock = () => {
     const ms = FOCUS.acc + (FOCUS.running ? Date.now() - FOCUS.t0 : 0);
     const s = Math.floor(ms / 1000);
-    text.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    const label = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    text.textContent = label;
+    const big = $('#focusClock');
+    if (big) big.textContent = label;
     btn.classList.toggle('running', FOCUS.running);
-    if (hint) hint.textContent = FOCUS.running ? '计时中 · 点一下暂停 · 右键清零' : '点一下开始 · 右键清零';
+    if (hint) hint.textContent = FOCUS.running ? '计时中 · 再次点开可暂停' : '点一下进入专注计时';
   };
-  btn.onclick = () => {
-    if (FOCUS.running) { FOCUS.acc += Date.now() - FOCUS.t0; FOCUS.running = false; }
-    else { FOCUS.t0 = Date.now(); FOCUS.running = true; }
-    paint();
-  };
-  btn.oncontextmenu = (e) => {
-    e.preventDefault();
-    FOCUS.acc = 0; FOCUS.running = false;
-    paint();
-  };
-  setInterval(() => { if (FOCUS.running) paint(); }, 500);
-  paint();
+  btn.onclick = () => openFocus();
 
   // 科目（方向）
   const pick = $('#profPick');
   const names = (STATE.professions || []).map((p) => p.name);
-  if (!names.includes('兽医学')) names.unshift('兽医学');
-  if (!names.includes('草业科学')) names.push('草业科学');
+  for (const n of ['兽医学', '草业科学', '动物科学']) if (!names.includes(n)) names.push(n);
   pick.innerHTML = names
     .map((n) => `<option${n === (STATE.profession || '兽医学') ? ' selected' : ''}>${esc(n)}</option>`)
     .join('');
   pick.onchange = async () => {
-    await api('POST', '/api/profession', { name: pick.value });
-    STATE.profession = pick.value;
+    const name = pick.value;
+    await api('POST', '/api/profession', { name });
+    STATE.profession = name;
+    // 专业变了，提示词里的专业也跟着变（服务端读 profile，无需额外操作）
     renderSidebar();
-    toast(`已切换到「${pick.value}」`);
+    toast(`已切换到「${name}」，AI 提示词同步换成该专业`);
   };
 
-  // 主题：第一栏里直接换
+  // 主题下拉
+  const tp = $('#themePick');
   paintThemeChips();
-  document.querySelectorAll('#themeRow [data-theme-pick]').forEach((chip) => {
-    chip.onclick = async () => {
-      applyTheme(chip.dataset.themePick);
-      paintThemeChips();
-      await api('POST', '/api/settings', { theme: chip.dataset.themePick });
-      const b = await api('GET', '/api/bootstrap');
-      STATE.profile = b.profile;
+  tp.onchange = async () => {
+    if (tp.value === 'custom') { openThemeModal(); return; }
+    applyTheme(tp.value);
+    await api('POST', '/api/settings', { theme: tp.value });
+    const b = await api('GET', '/api/bootstrap');
+    STATE.profile = b.profile;
+    applyTheme(tp.value);
+  };
+
+  bindFocus();
+  bindThemeModal();
+  setInterval(() => { if (FOCUS.running) paintClock(); }, 500);
+  paintClock();
+}
+
+// ---------- 专注计时器 ----------
+function openFocus() {
+  const scr = $('#focusScreen');
+  scr.classList.remove('hidden');
+  if (window.nativeApi && window.nativeApi.setFullscreen) window.nativeApi.setFullscreen(true);
+  FOCUS.full = true;
+  const toggle = $('#focusToggle');
+  toggle.textContent = FOCUS.running ? '暂停' : '开始';
+  $('#focusMsg').textContent = FOCUS.running ? '正在专注…' : '点「开始」就进入专注';
+}
+
+function closeFocus() {
+  $('#focusScreen').classList.add('hidden');
+  if (window.nativeApi && window.nativeApi.setFullscreen) window.nativeApi.setFullscreen(false);
+  FOCUS.full = false;
+  $('#focusMsg').textContent = '';
+  $('#focusMsg').classList.remove('hit');
+}
+
+function bindFocus() {
+  const toggle = $('#focusToggle');
+  toggle.onclick = () => {
+    if (FOCUS.running) {
+      FOCUS.acc += Date.now() - FOCUS.t0;
+      FOCUS.running = false;
+      toggle.textContent = '继续';
+      $('#focusMsg').textContent = '已暂停';
+    } else {
+      FOCUS.t0 = Date.now();
+      FOCUS.running = true;
+      toggle.textContent = '暂停';
+      $('#focusMsg').textContent = '正在专注…';
+      $('#focusMsg').classList.remove('hit');
+    }
+  };
+  $('#focusExit').onclick = closeFocus;
+
+  // 里程碑鼓励
+  const REWARD = [
+    [30 * 60, '已经坐了 30 分钟，喝口水，接着来。'],
+    [60 * 60, '整整 1 小时了。你今天比昨天更稳。'],
+    [90 * 60, '1 小时 30 分 —— 这个强度已经超过大多数人了。'],
+    [120 * 60, '2 小时。真的，去站起来走两步。'],
+    [180 * 60, '3 小时，你已经进入状态了，别硬撑，休息 10 分钟。'],
+  ];
+  setInterval(() => {
+    if (!FOCUS.running) return;
+    const s = Math.floor((FOCUS.acc + Date.now() - FOCUS.t0) / 1000);
+    for (const [at, msg] of REWARD) {
+      if (s >= at && !FOCUS.milestones.includes(at)) {
+        FOCUS.milestones.push(at);
+        const m = $('#focusMsg');
+        if (m && !$('#focusScreen').classList.contains('hidden')) {
+          m.textContent = msg;
+          m.classList.add('hit');
+        }
+        toast(msg);
+      }
+    }
+  }, 1000);
+}
+
+// 键盘：Esc 退出专注
+window.addEventListener('keydown', (e) => {
+  const scr = $('#focusScreen');
+  if (e.key === 'Escape' && scr && !scr.classList.contains('hidden')) {
+    e.preventDefault();
+    closeFocus();
+  }
+});
+
+// ---------- 自定义主题 ----------
+let THEME_TMP = null;
+
+function parseCustom() {
+  try {
+    const raw = STATE.profile && STATE.profile.theme_custom;
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function openThemeModal() {
+  const c = parseCustom();
+  $('#cBg').value = c.bg || '#fbfbf9';
+  $('#cPanel').value = c.panel || '#ffffff';
+  $('#cInk').value = c.ink || '#1b1b1b';
+  $('#cAccent').value = c.accent || '#003399';
+  THEME_TMP = { ...c };
+  $('#bgName').textContent = c.bgImage ? c.bgImage.split('/').pop() : '未选';
+  $('#themeModal').classList.remove('hidden');
+}
+
+function bindThemeModal() {
+  $('#themeClose').onclick = () => {
+    $('#themeModal').classList.add('hidden');
+    paintThemeChips();
+  };
+  $('#btnBgPick').onclick = async () => {
+    if (!window.nativeApi || !window.nativeApi.pickImage) return toast('网页版不支持选图');
+    const files = await window.nativeApi.pickImage();
+    if (!files || !files.length) return;
+    const rel = await window.nativeApi.importBackground(files[0]);
+    THEME_TMP.bgImage = rel;
+    $('#bgName').textContent = rel.split('/').pop();
+  };
+  $('#btnBgClear').onclick = () => {
+    THEME_TMP.bgImage = '';
+    $('#bgName').textContent = '未选';
+  };
+  $('#themeApply').onclick = async () => {
+    const c = {
+      bg: $('#cBg').value,
+      panel: $('#cPanel').value,
+      ink: $('#cInk').value,
+      accent: $('#cAccent').value,
+      bgImage: (THEME_TMP && THEME_TMP.bgImage) || '',
     };
-  });
+    await api('POST', '/api/settings', { theme: 'custom', theme_custom: JSON.stringify(c) });
+    const b = await api('GET', '/api/bootstrap');
+    STATE.profile = b.profile;
+    applyTheme('custom');
+    $('#themeModal').classList.add('hidden');
+    toast('自定义主题已应用');
+  };
+  $('#themeReset').onclick = async () => {
+    await api('POST', '/api/settings', { theme: 'paper', theme_custom: '' });
+    const b = await api('GET', '/api/bootstrap');
+    STATE.profile = b.profile;
+    applyTheme('paper');
+    $('#themeModal').classList.add('hidden');
+    toast('已恢复默认配色');
+  };
 }
 
 function paintThemeChips() {
   const cur = (STATE.profile && STATE.profile.theme) || 'paper';
+  const sel = $('#themePick');
+  if (sel) sel.value = ['paper', 'warm', 'dark', 'custom'].includes(cur) ? cur : 'paper';
   document.querySelectorAll('[data-theme-pick]').forEach((chip) => {
     chip.dataset.on = chip.dataset.themePick === cur ? '1' : '0';
   });
@@ -150,10 +284,29 @@ async function boot() {
   route();
 }
 
-// 换肤：只改 <html data-theme>，颜色全交给 CSS 变量
+// 换肤：内置三套走 data-theme，自定义直接覆盖 CSS 变量
 function applyTheme(theme) {
-  const t = ['paper', 'warm', 'dark'].includes(theme) ? theme : 'paper';
-  document.documentElement.dataset.theme = t;
+  const t = ['paper', 'warm', 'dark', 'custom'].includes(theme) ? theme : 'paper';
+  const root = document.documentElement;
+  document.documentElement.dataset.theme = t === 'custom' ? 'paper' : t;
+  for (const v of ['--bg', '--panel', '--ink', '--accent']) root.style.removeProperty(v);
+  document.body.classList.remove('has-bg');
+  document.body.style.backgroundImage = '';
+  document.body.style.backgroundColor = '';
+
+  if (t === 'custom') {
+    const c = parseCustom();
+    if (c.bg) root.style.setProperty('--bg', c.bg);
+    if (c.panel) root.style.setProperty('--panel', c.panel);
+    if (c.ink) root.style.setProperty('--ink', c.ink);
+    if (c.accent) root.style.setProperty('--accent', c.accent);
+    if (c.bgImage) {
+      const url = imgUrl(c.bgImage);
+      document.body.style.backgroundImage = `url("${url}")`;
+      document.body.style.backgroundColor = c.bg || '';
+      document.body.classList.add('has-bg');
+    }
+  }
   STATE.profile.theme = t;
   paintThemeChips();
 }

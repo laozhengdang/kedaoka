@@ -9,5 +9,10 @@ contextBridge.exposeInMainWorld('nativeApi', {
   pickFiles: () => ipcRenderer.invoke('pick-files'),
   // 拖进来的文件：把字节交给主进程落到 data/incoming，再返回真实路径
   dropFile: (name, buffer) => ipcRenderer.invoke('drop-file', { name, buffer }),
+  // 专注计时用：真正的窗口全屏
+  setFullscreen: (on) => ipcRenderer.invoke('set-fullscreen', on),
+  // 自定义主题：选背景图并复制进数据目录
+  pickImage: () => ipcRenderer.invoke('pick-image'),
+  importBackground: (p) => ipcRenderer.invoke('import-background', p),
   isDesktop: true,
 });
