@@ -360,6 +360,8 @@ def main():
     ap.add_argument("--file", required=True)
     ap.add_argument("--course-name", required=True)
     ap.add_argument("--profession", default="兽医学")
+    ap.add_argument("--kind", default="theory", choices=["theory", "lab"],
+                    help="theory=理论课，lab=实验课")
     ap.add_argument("--reparse", action="store_true", help="同一文件重新解析（先删旧数据）")
     args = ap.parse_args()
 
@@ -388,8 +390,8 @@ def main():
     doc = pymupdf.open(path)
     fid = uid("file_")
     conn.execute(
-        "INSERT INTO source_file(id,course_id,path,sha256,pages,imported_at) VALUES(?,?,?,?,?,?)",
-        (fid, course_id, str(path), sha, len(doc), now()),
+        "INSERT INTO source_file(id,course_id,path,sha256,pages,imported_at,kind) VALUES(?,?,?,?,?,?,?)",
+        (fid, course_id, str(path), sha, len(doc), now(), args.kind),
     )
 
     # 1) 存页 + 抽图

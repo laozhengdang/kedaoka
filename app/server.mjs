@@ -36,7 +36,7 @@ const server = createServer(async (req, res) => {
     try {
       if (path === '/api/import' && req.method === 'POST') {
         const b = await readBody(req);
-        const job = startImport(b.file, b.courseName);
+        const job = startImport(b.file, b.courseName, b.kind || 'theory');
         res.writeHead(200, { 'content-type': MIME['.json'] });
         return res.end(JSON.stringify({ job }));
       }

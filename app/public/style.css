@@ -330,3 +330,24 @@ html[data-theme="dark"] .ai-ok-title { color: #9fe0b6; }
 html[data-theme="dark"] .ai-status.good { background: #1b2f22; border-color: #2f5c3e; color: #9fe0b6; }
 html[data-theme="dark"] .ai-status.bad { background: #331c1c; border-color: #6b3232; color: #f0a9a9; }
 html[data-theme="dark"] .outline b { color: #fff; }
+
+/* ---------- 侧栏分区：课程 / 工具 ---------- */
+.side-label {
+  padding: 14px 20px 4px;
+  font-size: 11px; letter-spacing: 2px; color: var(--muted);
+}
+.tools { padding: 0 12px 6px; }
+.tool-row {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: 8px 10px; margin-bottom: 4px;
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  font: inherit; font-size: 13px; color: var(--ink); cursor: pointer; text-align: left;
+}
+.tool-row:hover { background: var(--accent-soft); }
+.tool-row.running { border-color: var(--accent); }
+.tool-val {
+  font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted);
+  background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px;
+}
+#profPick { font-size: 12px; color: var(--ink); }
+html[data-theme="dark"] #profPick { background: #23262c; color: var(--ink); }

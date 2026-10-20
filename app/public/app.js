@@ -48,7 +48,10 @@ window.addEventListener('unhandledrejection', (e) => {
 function renderSidebar() {
   const box = $('#courseList');
   box.innerHTML = '';
-  for (const c of STATE.courses) {
+  const prof = STATE.profession || '兽医学';
+  const ids = (STATE.professions || []).filter((p) => p.name === prof).map((p) => p.id);
+  const list = STATE.courses.filter((c) => !ids.length || ids.includes(c.profession_id));
+  for (const c of list) {
     const started = c.today.total > 0;
     const left = Math.max(0, c.today.total - c.today.done);
     const row = el('div', `course ${started ? 'on' : ''} ${STATE.current === c.id ? 'active' : ''}`);
@@ -57,9 +60,59 @@ function renderSidebar() {
     row.onclick = () => { location.hash = `#/course/${c.id}`; };
     box.appendChild(row);
   }
-  if (!STATE.courses.length) {
-    box.appendChild(el('div', 'empty', '还没有课程<br><br>点下面「导入课件」'));
+  if (!list.length) {
+    box.appendChild(el('div', 'empty', STATE.courses.length
+      ? `「${esc(prof)}」下还没有课程`
+      : '还没有课程<br><br>点下面「新建学科」'));
   }
+}
+
+// ---------------- 工具区：独立计时器 ----------------
+const FOCUS = { running: false, t0: 0, acc: 0, timer: null };
+
+function bindTools() {
+  // 独立计时器：自己点开始，跟复习无关
+  const btn = $('#btnTimer');
+  const text = $('#timerText');
+  const paint = () => {
+    const ms = FOCUS.acc + (FOCUS.running ? Date.now() - FOCUS.t0 : 0);
+    const s = Math.floor(ms / 1000);
+    text.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    btn.classList.toggle('running', FOCUS.running);
+    btn.title = FOCUS.running ? '点击暂停' : '点击开始计时';
+  };
+  const tick = () => { if (FOCUS.running) paint(); };
+  btn.onclick = () => {
+    if (FOCUS.running) {
+      FOCUS.acc += Date.now() - FOCUS.t0;
+      FOCUS.running = false;
+    } else {
+      FOCUS.t0 = Date.now();
+      FOCUS.running = true;
+    }
+    paint();
+  };
+  btn.oncontextmenu = (e) => {           // 右键清零
+    e.preventDefault();
+    FOCUS.acc = 0;
+    FOCUS.running = false;
+    paint();
+  };
+  setInterval(tick, 500);
+  paint();
+
+  // 方向切换
+  const pick = $('#profPick');
+  const names = (STATE.professions || []).map((p) => p.name);
+  if (!names.includes('兽医学')) names.unshift('兽医学');
+  if (!names.includes('草业科学')) names.push('草业科学');
+  pick.innerHTML = names.map((n) => `<option${n === (STATE.profession || '兽医学') ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  pick.onchange = async () => {
+    await api('POST', '/api/profession', { name: pick.value });
+    STATE.profession = pick.value;
+    renderSidebar();
+    toast(`已切换到「${pick.value}」`);
+  };
 }
 
 // ---------------- 路由 ----------------
@@ -70,12 +123,15 @@ async function boot() {
   const b = await api('GET', '/api/bootstrap');
   STATE.profile = b.profile;
   STATE.courses = b.courses;
+  STATE.professions = b.professions || [];
+  STATE.profession = b.profession || '兽医学';
   if (window.nativeApi && window.nativeApi.dataDir) {
     STATE.dataDir = await window.nativeApi.dataDir();
   }
   applyTheme(STATE.profile.theme || 'paper');
   renderSidebar();
   bindChrome();
+  bindTools();
   route();
 }
 
@@ -266,7 +322,8 @@ async function viewCourse(id) {
 
   w.innerHTML = `
     <h1>${esc(d.course.name)}</h1>
-    <p class="sub">共 ${d.course.cards || ''} 张卡 · ${d.course.mode === 'calc' ? '计算型' : '概念型'}</p>
+    <p class="sub">共 ${d.course.cards || ''} 张卡 · 理论 ${d.course.kinds?.theory || 0} / 实验 ${d.course.kinds?.lab || 0}
+      · ${d.course.mode === 'calc' ? '计算型' : '概念型'}</p>
     <div class="row" style="margin:10px 0 4px">
       <button id="btnImportHere" class="small primary">＋ 导入课件到本学科</button>
       <button id="btnRefine" class="small">用 AI 重新整理术语</button>
@@ -802,10 +859,10 @@ async function viewGraph(id) {
 }
 
 // ---------------- 仓库 ----------------
-async function viewBrowse(id, q = '', filter = 'all', silent = false) {
+async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '') {
   STATE.current = id;
   renderSidebar();
-  const d = await api('GET', `/api/browse/${id}?q=${encodeURIComponent(q)}&filter=${filter}`);
+  const d = await api('GET', `/api/browse/${id}?q=${encodeURIComponent(q)}&filter=${filter}${kind ? '&kind=' + kind : ''}`);
   const m = $('#main');
   m.innerHTML = '';
   const cname = (STATE.courses.find((x) => x.id === id) || {}).name || '';
@@ -822,15 +879,23 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false) {
       <button class="small ${filter === 'weak' ? 'primary' : ''}" data-f="weak">只看薄弱的</button>
       <button class="small ${filter === 'star4' ? 'primary' : ''}" data-f="star4">只看 4★ 以上</button>
     </div>
+    <div class="row" style="margin-bottom:10px">
+      <button class="small ${!kind ? 'primary' : ''}" data-k="">理论+实验</button>
+      <button class="small ${kind === 'theory' ? 'primary' : ''}" data-k="theory">只看理论课</button>
+      <button class="small ${kind === 'lab' ? 'primary' : ''}" data-k="lab">只看实验课</button>
+    </div>
     <p class="sub">点击术语查看释义（默认折叠，先自己回想一遍）</p>
     <div id="list"></div>`;
   m.appendChild(w);
   w.querySelector('[data-t="today"]').onclick = () => { location.hash = `#/course/${id}`; };
   const qEl = w.querySelector('#q');
-  qEl.oninput = debounce((e) => viewBrowse(id, e.target.value, filter, true), 220);
+  qEl.oninput = debounce((e) => viewBrowse(id, e.target.value, filter, true, kind), 220);
   if (silent) { qEl.focus(); const n = qEl.value.length; qEl.setSelectionRange(n, n); }
   w.querySelectorAll('[data-f]').forEach((b) => {
-    b.onclick = () => viewBrowse(id, q, b.dataset.f);
+    b.onclick = () => viewBrowse(id, q, b.dataset.f, false, kind);
+  });
+  w.querySelectorAll('[data-k]').forEach((b) => {
+    b.onclick = () => viewBrowse(id, q, filter, false, b.dataset.k);
   });
 
   const list = w.querySelector('#list');
@@ -1322,9 +1387,10 @@ async function doImport() {
   const file = $('#importPath').value.trim();
   const courseName = $('#importCourse').value.trim();
   if (!file || !courseName) return toast('路径和课程名都要填');
+  const kind = document.querySelector('input[name="kind"]:checked')?.value || 'theory';
   $('#importGo').disabled = true;
-  $('#importLog').textContent = '解析中…（无 AI，纯本地）';
-  const { job } = await api('POST', '/api/import', { file, courseName });
+  $('#importLog').textContent = `解析中…（${kind === 'lab' ? '实验课' : '理论课'}，无 AI，纯本地）`;
+  const { job } = await api('POST', '/api/import', { file, courseName, kind });
   const poll = setInterval(async () => {
     const j = await api('GET', `/api/job/${job}`);
     $('#importLog').textContent = j.log || '…';

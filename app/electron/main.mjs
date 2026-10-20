@@ -46,7 +46,7 @@ async function createWindow() {
 // 前端所有数据请求都走这里
 ipcMain.handle('api', async (_e, { method, path, body }) => {
   const { callApi, startImport, getJob } = await import('../api.mjs');
-  if (path === '/api/import' && method === 'POST') return { job: startImport(body.file, body.courseName) };
+  if (path === '/api/import' && method === 'POST') return { job: startImport(body.file, body.courseName, body.kind || 'theory') };
   if (path.startsWith('/api/job/')) return getJob(path.slice('/api/job/'.length));
   return callApi(method, path, body || {});
 });

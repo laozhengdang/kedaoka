@@ -11,7 +11,18 @@
 <div id="app">
   <aside id="sidebar">
     <div class="brand">妙妙小工具</div>
+    <div class="side-label">课程</div>
     <div class="courses" id="courseList"></div>
+    <div class="side-label">工具</div>
+    <div class="tools">
+      <button id="btnTimer" class="tool-row">
+        <span>独立计时器</span><span id="timerText" class="tool-val">00:00</span>
+      </button>
+      <div class="tool-row" style="cursor:default">
+        <span>方向</span>
+        <select id="profPick" class="tool-val" style="width:96px"></select>
+      </div>
+    </div>
     <div class="side-foot">
       <button id="btnNewCourse" class="ghost">＋ 新建学科</button>
       <button id="btnSettings" class="ghost">设置</button>
@@ -46,6 +57,10 @@
     </div>
     <input id="importPath" placeholder="文件路径（选完会自动填）">
     <input id="importCourse" placeholder="学科名">
+    <div class="row" style="gap:16px;margin:6px 0 2px">
+      <label><input type="radio" name="kind" value="theory" checked> 理论课</label>
+      <label><input type="radio" name="kind" value="lab"> 实验课</label>
+    </div>
     <div class="row">
       <button id="importGo" class="primary">开始导入</button>
       <button id="importClose" class="ghost">关闭</button>

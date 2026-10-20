@@ -156,14 +156,37 @@ const handlers = {
       const q = queueState(c.id);
       return { ...c, today: { total: q.total, done: q.done } };
     });
-    return { profile: getProfile(), courses: out, today: today() };
+    const professions = db.prepare('SELECT id, name FROM profession ORDER BY name').all();
+    const prof = getProfile().profession || '兽医学';
+    return { profile: getProfile(), courses: out, today: today(), professions, profession: prof };
+  },
+
+  // 切换专业方向（大分类：兽医 / 草业 …）
+  'POST /api/profession': (_p, b) => {
+    const name = String(b?.name || '').trim();
+    if (!name) throw new Error('专业名不能为空');
+    let prof = db.prepare('SELECT id FROM profession WHERE name=?').get(name);
+    if (!prof) {
+      prof = { id: uid('prof_') };
+      db.prepare('INSERT INTO profession(id,name) VALUES(?,?)').run(prof.id, name);
+    }
+    setProfile('profession', name);
+    return { ok: true, profession: name, id: prof.id };
   },
 
   'GET /api/course/:id': (p) => {
     const c = db.prepare('SELECT * FROM course WHERE id=?').get(p.id);
     if (!c) throw new Error('课程不存在');
     const cards = db.prepare("SELECT COUNT(*) n FROM card WHERE course_id=? AND status='active'").get(p.id).n;
-    return { course: { ...c, cards }, queue: queueState(p.id) };
+    // 理论课 / 实验课各多少张（按来源文件区分）
+    const kinds = db.prepare(`
+      SELECT COALESCE(sf.kind,'theory') k, COUNT(*) n
+      FROM card c LEFT JOIN source_file sf ON sf.id=c.file_id
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+      GROUP BY k`).all(p.id);
+    const kindCount = { theory: 0, lab: 0 };
+    for (const r of kinds) kindCount[r.k] = r.n;
+    return { course: { ...c, cards, kinds: kindCount }, queue: queueState(p.id) };
   },
 
   'POST /api/start/:id': (p) => {
@@ -289,6 +312,11 @@ const handlers = {
                LEFT JOIN source_file sf ON sf.id=pg.file_id
                WHERE c.course_id=? AND c.status='active' AND c.is_title=0`;
     const args = [p.id];
+    const kind = p.query?.kind;
+    if (kind === 'theory' || kind === 'lab') {
+      sql += " AND COALESCE((SELECT kind FROM source_file WHERE id=c.file_id),'theory')=?";
+      args.push(kind);
+    }
     if (q) { sql += ' AND (c.front LIKE ? OR c.back LIKE ?)'; args.push(`%${q}%`, `%${q}%`); }
     if (filter === 'weak') sql += " AND COALESCE(s.state,'new') IN ('learning','relearning')";
     if (filter === 'star4') sql += ' AND c.importance>=4';
@@ -495,11 +523,12 @@ export function callApi(method, rawPath, body = {}) {
 // ---------- 导入（调用 python 解析，无 AI） ----------
 const jobs = new Map();
 
-export function startImport(filePath, courseName) {
+export function startImport(filePath, courseName, kind = 'theory') {
   const id = uid('job_');
   const job = { id, status: 'running', log: '', result: null };
   jobs.set(id, job);
-  const py = spawn('python', [join(ROOT, 'tools', 'ingest.py'), '--file', filePath, '--course-name', courseName], {
+  const py = spawn('python', [join(ROOT, 'tools', 'ingest.py'),
+    '--file', filePath, '--course-name', courseName, '--kind', kind], {
     cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
   });
   py.stdout.on('data', (d) => { job.log += d.toString(); });
