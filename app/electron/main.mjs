@@ -297,7 +297,8 @@ app.whenReady().then(async () => {
         // 机制图
         await win.webContents.executeJavaScript(`(async () => {
           const b = await window.nativeApi.invoke('GET', '/api/bootstrap');
-          const c = b.courses.find(x => x.name === '免疫学') || b.courses[0];
+          const want = ${JSON.stringify(process.env.SHOT_COURSE || '免疫学')};
+          const c = b.courses.find(x => x.name === want) || b.courses[0];
           location.hash = '#/diagram/' + c.id;
           await new Promise(r => setTimeout(r, 900));
         })()`);

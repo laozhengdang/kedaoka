@@ -427,6 +427,9 @@ const DIAGRAM_SYSTEM = () => `你是${majorName()}专业的助教，要把一章
 
 规则：
 - 只能用清单里出现的概念名，不要自己造词，不要改写名字
+- **箭头方向统一表示"导致 / 进而"**：疾病、病因、生理过程放上游（图的上方），
+  药物、治疗手段、结果放下游（图的下方）。不要把"X 药治疗 Y 病"画成 药→病，
+  要写成 Y 病（靶点）→ X 药 的"干预"关系
 - 起点放最上游（原因、前提、分类的总称），终点放最下游（结果、应用、产物）
 - 不要画出环（A→B→A）
 - 概念少于 8 个就全用上，不要硬凑
@@ -472,7 +475,7 @@ export function startDiagramGen(courseId, opts = {}) {
         byCh.get(k).push(r);
       }
       targets = [...byCh.entries()]
-        .filter(([, list]) => list.length >= 3)
+        .filter(([k, list]) => k !== '未分章' && list.length >= 3)
         .sort((a, b) => b[1].length - a[1].length)
         .slice(0, 6)
         .map(([k]) => k);
@@ -534,6 +537,18 @@ export function startDiagramGen(courseId, opts = {}) {
 
 // 把"概念 + 关系"排成 draw.io 风格的 XML：先分层，再定坐标
 function buildDiagramXml(labels, edges, title) {
+  // 药物类节点如果跑到最上游，说明 AI 把"X药 治疗 Y 病"画成了 药→病。
+  // 这种图读起来是反的（药在上、病在下），整张图翻转一次边方向。
+  const drugLike = (s) => /(药|剂|素|抗体|疫苗|抑制剂|阻断药|拮抗药)$/.test(String(s));
+  const hasIncoming = new Set(edges.map((e) => e.to));
+  const roots = labels.filter((l) => !hasIncoming.has(l));
+  const drugRoots = roots.filter(drugLike).length;
+  let list = edges;
+  if (roots.length && drugRoots >= Math.max(1, Math.ceil(roots.length / 2))) {
+    list = edges.map((e) => ({ ...e, from: e.to, to: e.from }));
+  }
+  edges = list;
+
   const idx = new Map(labels.map((l, i) => [l, i]));
   const incoming = new Map(labels.map((l) => [l, []]));
   for (const e of edges) incoming.get(e.to)?.push(e.from);
@@ -559,28 +574,40 @@ function buildDiagramXml(labels, edges, title) {
   }
 
   const NODE_H = 44;
-  const GAP_Y = 54;
-  const COL_GAP = 34;
+  const ROW_GAP = 18;      // 同一层里换行的间距
+  const GAP_Y = 46;        // 层与层的间距
+  const COL_GAP = 26;
+  const PER_ROW = 4;       // 一层最多横排 4 个，多了往下折
   const pos = {};
   const layers = [...byLayer.keys()].sort((a, b) => a - b);
-  let maxW = 0;
+
+  const widthOf = (l) => Math.min(210, Math.max(112, l.length * 14 + 24));
+  const chunk = (arr, n) => {
+    const out = [];
+    for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+    return out;
+  };
+
+  let y = 30;
   for (const k of layers) {
     const items = byLayer.get(k);
-    const widths = items.map((l) => Math.min(220, Math.max(120, l.length * 15 + 28)));
-    const totalW = widths.reduce((a, b) => a + b, 0) + COL_GAP * (items.length - 1);
-    maxW = Math.max(maxW, totalW);
+    const rows = chunk(items, PER_ROW);
+    for (const row of rows) {
+      const widths = row.map(widthOf);
+      const totalW = widths.reduce((a, b) => a + b, 0) + COL_GAP * (row.length - 1);
+      let x = 40;
+      row.forEach((l, i) => {
+        pos[l] = { x, y, w: widths[i], h: NODE_H };
+        x += widths[i] + COL_GAP;
+      });
+      y += NODE_H + ROW_GAP;
+    }
+    y += GAP_Y - ROW_GAP;
   }
-  for (const k of layers) {
-    const items = byLayer.get(k);
-    const widths = items.map((l) => Math.min(220, Math.max(120, l.length * 15 + 28)));
-    const totalW = widths.reduce((a, b) => a + b, 0) + COL_GAP * (items.length - 1);
-    let x = (maxW - totalW) / 2 + 40;
-    const y = 30 + k * (NODE_H + GAP_Y);
-    items.forEach((l, i) => {
-      pos[l] = { x, y, w: widths[i], h: NODE_H };
-      x += widths[i] + COL_GAP;
-    });
-  }
+
+  // 整体左对齐到 40，保证不出负数坐标
+  const minX = Math.min(...labels.map((l) => pos[l].x));
+  for (const l of labels) pos[l].x += 40 - minX;
 
   const esc2 = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');

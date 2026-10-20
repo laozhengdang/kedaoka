@@ -347,7 +347,8 @@ const handlers = {
 
   // ---- 机制图 ----
   'GET /api/diagrams/:id': (p) => {
-    const rows = db.prepare('SELECT id, title, created_at FROM diagram WHERE course_id=? ORDER BY created_at DESC')
+    // 按生成顺序排（先画的是最大的那一章，放最前面）
+    const rows = db.prepare('SELECT id, title, created_at FROM diagram WHERE course_id=? ORDER BY created_at')
       .all(p.id);
     return { total: rows.length, diagrams: rows };
   },
