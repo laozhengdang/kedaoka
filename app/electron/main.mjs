@@ -201,6 +201,25 @@ app.whenReady().then(async () => {
         return (document.body.innerText || '').slice(0, 160);
       })()`);
       log.push('课程页文本: ' + r1.replace(/\\n/g, ' | '));
+      const courseAudit = await win.webContents.executeJavaScript(`JSON.stringify({
+        tinted: document.querySelectorAll('.btn-tint').length,
+        colored: [...document.querySelectorAll('.btn-tint')].map((b) => getComputedStyle(b).backgroundColor).filter((c) => c && c !== 'rgba(0, 0, 0, 0)').length,
+        actions: !!document.querySelector('.actions'),
+      })`);
+      log.push('按钮体检: ' + courseAudit);
+      const statsAudit = await win.webContents.executeJavaScript(`(async () => {
+        const b = await window.nativeApi.invoke('GET', '/api/bootstrap');
+        location.hash = '#/stats/' + b.courses[0].id;
+        await new Promise(r => setTimeout(r, 900));
+        const list = document.querySelector('#fuzzyList');
+        return JSON.stringify({
+          hasList: !!list,
+          items: list ? list.querySelectorAll('[data-card]').length : 0,
+          navBack: !!document.querySelector('#stBack'),
+          navSet: document.querySelectorAll('[data-jump]').length,
+        });
+      })()`);
+      log.push('统计体检: ' + statsAudit);
       try {
         const { writeFileSync: wf2 } = await import('node:fs');
         await win.webContents.executeJavaScript(`(async () => {
@@ -354,6 +373,8 @@ app.whenReady().then(async () => {
         expCsv: !!document.querySelector('#expCsv'),
         expBackup: !!document.querySelector('#expBackup'),
         advClear: !!document.querySelector('#advClearQueue'),
+        plainBtn: !!document.querySelector('#pPlainBtn'),
+        setNav: document.querySelectorAll('.set-nav a').length,
       })`);
       log.push('控件体检: ' + audit);
       // 专注计时器外观
