@@ -1,4 +1,4 @@
-// api.mjs —— 所有业务逻辑都在这里，服务端和桌面端共用同一份。
+﻿// api.mjs —— 所有业务逻辑都在这里，服务端和桌面端共用同一份。
 // server.mjs（网页版）调 callApi；electron/main.mjs（桌面版）也调 callApi。
 
 import { spawn } from 'node:child_process';
@@ -379,6 +379,7 @@ const handlers = {
   'GET /api/batches/:id': (p) => {
     const rows = db.prepare(`
       SELECT sf.id, sf.path, sf.pages, sf.imported_at, COALESCE(sf.kind,'theory') kind,
+             COALESCE(sf.doc_type,'ppt') doc_type,
              COALESCE(sf.active,1) active,
              (SELECT COUNT(*) FROM card c WHERE c.file_id=sf.id AND c.status='active' AND c.is_title=0) cards
       FROM source_file sf WHERE sf.course_id=? ORDER BY sf.imported_at`).all(p.id);
@@ -537,7 +538,123 @@ const handlers = {
     return { ok: true };
   },
 
-  // ---- 考试模式：随机抽 N 张，答完给分 ----
+  // ---- 模拟卷：配置 → 作答 → 交卷 ----
+  'POST /api/exam/:id/start': (p, b) => {
+    const n = Math.max(5, Math.min(100, Number(b?.n) || 20));
+    const chapter = String(b?.chapter || '');
+    const minutes = Math.max(0, Number(b?.minutes) || 0);
+    let rows = db.prepare(`
+      SELECT c.id, c.front, c.back, c.importance, c.source_page, c.image_path,
+             pg.chapter AS chapter
+      FROM card c
+      LEFT JOIN page pg ON pg.id = (
+        SELECT p2.id FROM page p2 WHERE p2.file_id = COALESCE(c.file_id, p2.file_id)
+          AND p2.page_no = c.source_page
+          AND p2.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
+        ORDER BY p2.id LIMIT 1)
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+      ORDER BY RANDOM() LIMIT ?`).all(p.id, chapter ? 400 : n);
+    if (chapter) {
+      rows = rows.filter((r) => (r.chapter || '') === chapter).slice(0, n);
+      rows = rows.sort(() => Math.random() - 0.5);
+    }
+    if (!rows.length) throw new Error('这门课还没有可考的卡片');
+    const id = uid('exam_');
+    db.prepare(`INSERT INTO exam_attempt(id,course_id,scope,total,right_count,minutes,used_sec,answers,created_at)
+      VALUES(?,?,?,?,0,?,0,'[]',?)`).run(id, p.id, chapter || '整门课', rows.length, minutes, nowIso());
+    return { attemptId: id, cards: rows, minutes, scope: chapter || '整门课' };
+  },
+  'POST /api/exam/answer': (_p, b) => {
+    const { attemptId, cardId, correct } = b || {};
+    if (!attemptId || !cardId) throw new Error('缺少参数');
+    const a = db.prepare('SELECT answers FROM exam_attempt WHERE id=?').get(attemptId);
+    if (!a) throw new Error('这次考试不存在');
+    const list = JSON.parse(a.answers);
+    if (!list.some((x) => x.cardId === cardId)) list.push({ cardId, correct: Boolean(correct) });
+    db.prepare('UPDATE exam_attempt SET answers=? WHERE id=?').run(JSON.stringify(list), attemptId);
+    return { ok: true };
+  },
+  'POST /api/exam/finish': (p, b) => {
+    const { attemptId, minutes } = b || {};
+    const a = db.prepare('SELECT * FROM exam_attempt WHERE id=?').get(attemptId);
+    if (!a) throw new Error('这次考试不存在');
+    const list = JSON.parse(a.answers);
+    const right = list.filter((x) => x.correct).length;
+    db.prepare('UPDATE exam_attempt SET right_count=?, used_sec=? WHERE id=?')
+      .run(right, Number(minutes) * 60 || 0, attemptId);
+    // 答错的打回队列（按"完全不记得"）
+    for (const x of list.filter((y) => !y.correct)) schedule(x.cardId, 4, 1);
+    const ids = list.map((x) => x.cardId);
+    const cards = ids.length ? db.prepare(
+      `SELECT id, front, back, source_page FROM card WHERE id IN (${ids.map(() => '?').join(',')})`)
+      .all(...ids) : [];
+    const byId = new Map(cards.map((c) => [c.id, c]));
+    const detail = list.map((x) => ({ ...x, card: byId.get(x.cardId) || null }));
+    return { ok: true, total: list.length, right, detail, attemptId };
+  },
+  'GET /api/exam-attempt/:id': (p) => {
+    const a = db.prepare('SELECT * FROM exam_attempt WHERE id=?').get(p.id);
+    if (!a) throw new Error('不存在');
+    const list = JSON.parse(a.answers);
+    const ids = list.map((x) => x.cardId);
+    const cards = ids.length ? db.prepare(
+      `SELECT id, front, back, source_page FROM card WHERE id IN (${ids.map(() => '?').join(',')})`)
+      .all(...ids) : [];
+    const byId = new Map(cards.map((c) => [c.id, c]));
+    return { attempt: a, detail: list.map((x) => ({ ...x, card: byId.get(x.cardId) || null })) };
+  },
+  // 错题本：所有做错过的题（按最近一次找卡）
+  'GET /api/wrong/:id': (p) => {
+    const rows = db.prepare(`
+      SELECT a.id AS attempt_id, a.created_at, a.answers
+      FROM exam_attempt a WHERE a.course_id=? ORDER BY a.created_at DESC LIMIT 30`).all(p.id);
+    const map = new Map();
+    for (const a of rows) {
+      for (const x of JSON.parse(a.answers)) {
+        if (x.correct) continue;
+        if (!map.has(x.cardId)) map.set(x.cardId, { cardId: x.cardId, last: a.created_at, times: 0, attemptId: a.id });
+        map.get(x.cardId).times += 1;
+      }
+    }
+    const ids = [...map.keys()];
+    const cards = ids.length ? db.prepare(
+      `SELECT id, front, back, source_page, status FROM card WHERE id IN (${ids.map(() => '?').join(',')})`)
+      .all(...ids) : [];
+    const out = cards.map((c) => ({ ...c, ...map.get(c.id) }));
+    return { total: out.length, cards: out };
+  },
+
+  // 把一张卡塞进今天的队列（术语详情页的按钮）
+  'POST /api/card/:id/queue': (p) => {
+    const c = db.prepare('SELECT course_id FROM card WHERE id=?').get(p.id);
+    if (!c) throw new Error('卡片不存在');
+    const date = today();
+    ensureQueue(c.course_id);
+    const round = latestRound(c.course_id, date);
+    const exists = db.prepare('SELECT 1 FROM daily_queue WHERE course_id=? AND date=? AND round=? AND card_id=?')
+      .get(c.course_id, date, round, p.id);
+    if (exists) return { ok: true, already: true };
+    const maxPos = db.prepare('SELECT COALESCE(MAX(position),0) p FROM daily_queue WHERE course_id=? AND date=? AND round=?')
+      .get(c.course_id, date, round).p;
+    db.prepare('INSERT INTO daily_queue(course_id,date,round,card_id,position) VALUES(?,?,?,?,?)')
+      .run(c.course_id, date, round, p.id, maxPos + 1);
+    return { ok: true };
+  },
+  // 这一页的原文（"查看原文"用，没有 PDF 阅读器就看这一页抽出来的文字）
+  'GET /api/page-text/:id': (p) => {
+    const c = db.prepare('SELECT course_id, source_page, file_id FROM card WHERE id=?').get(p.id);
+    if (!c) throw new Error('卡片不存在');
+    const row = db.prepare(`
+      SELECT p.text, p.chapter, sf.path FROM page p JOIN source_file sf ON sf.id=p.file_id
+      WHERE p.page_no=? AND sf.course_id=? AND (? IS NULL OR p.file_id=?)
+      ORDER BY p.id LIMIT 1`).get(c.source_page, c.course_id, c.file_id, c.file_id);
+    return {
+      page: c.source_page,
+      chapter: row?.chapter || '',
+      fileName: row?.path ? String(row.path).split(/[\\/]/).pop() : '',
+      text: row?.text || '',
+    };
+  },
   'GET /api/exam/:id': (p) => {
     const n = Math.max(5, Math.min(100, Number(p.query?.n) || 20));
     const rows = db.prepare(`
@@ -854,12 +971,12 @@ function pythonExe() {
 
 const jobs = new Map();
 
-export function startImport(filePath, courseName, kind = 'theory') {
+export function startImport(filePath, courseName, kind = 'theory', docType = 'ppt') {
   const id = uid('job_');
   const job = { id, status: 'running', log: '', result: null };
   jobs.set(id, job);
   const py = spawn(pythonExe(), [join(ROOT, 'tools', 'ingest.py'),
-    '--file', filePath, '--course-name', courseName, '--kind', kind], {
+    '--file', filePath, '--course-name', courseName, '--kind', kind, '--doc-type', docType], {
     cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
   });
   py.stdout.on('data', (d) => { job.log += d.toString(); });

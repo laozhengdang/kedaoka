@@ -88,6 +88,15 @@
       <label><input type="radio" name="kind" value="theory" checked> 理论课</label>
       <label><input type="radio" name="kind" value="lab"> 实验课</label>
     </div>
+    <div class="row" style="align-items:center;gap:10px;margin:8px 0 2px">
+      <label style="width:70px">这份是</label>
+      <select id="importDocType" class="tool-select" style="flex:1">
+        <option value="ppt">授课课件</option>
+        <option value="exam">题库真题</option>
+        <option value="notes">复习资料</option>
+        <option value="syllabus">考纲 / 复习提纲</option>
+      </select>
+    </div>
     <div class="row">
       <button id="importGo" class="primary">开始导入</button>
       <button id="importClose" class="ghost">关闭</button>

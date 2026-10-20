@@ -1,4 +1,4 @@
-// server.mjs —— 网页版入口（开发/备用）。桌面版请用 electron/main.mjs。
+﻿// server.mjs —— 网页版入口（开发/备用）。桌面版请用 electron/main.mjs。
 // 只用 Node 内置模块，零依赖。
 
 import { createServer } from 'node:http';
@@ -36,7 +36,7 @@ const server = createServer(async (req, res) => {
     try {
       if (path === '/api/import' && req.method === 'POST') {
         const b = await readBody(req);
-        const job = startImport(b.file, b.courseName, b.kind || 'theory');
+        const job = startImport(b.file, b.courseName, b.kind || 'theory', b.docType || 'ppt');
         res.writeHead(200, { 'content-type': MIME['.json'] });
         return res.end(JSON.stringify({ job }));
       }

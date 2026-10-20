@@ -1,4 +1,4 @@
-"""ingest.py —— 把一份 PDF 课件变成卡片（无 AI 降级模式，见文档 24.10）
+﻿"""ingest.py —— 把一份 PDF 课件变成卡片（无 AI 降级模式，见文档 24.10）
 
 做的事：
   1. sha256 去重，同一份文件不会导入两次
@@ -362,6 +362,9 @@ def main():
     ap.add_argument("--profession", default="兽医学")
     ap.add_argument("--kind", default="theory", choices=["theory", "lab"],
                     help="theory=理论课，lab=实验课")
+    ap.add_argument("--doc-type", default="ppt",
+                    choices=["ppt", "exam", "notes", "syllabus"],
+                    help="ppt=授课课件，exam=题库真题，notes=复习资料，syllabus=考纲提纲")
     ap.add_argument("--reparse", action="store_true", help="同一文件重新解析（先删旧数据）")
     args = ap.parse_args()
 
@@ -390,8 +393,8 @@ def main():
     doc = pymupdf.open(path)
     fid = uid("file_")
     conn.execute(
-        "INSERT INTO source_file(id,course_id,path,sha256,pages,imported_at,kind) VALUES(?,?,?,?,?,?,?)",
-        (fid, course_id, str(path), sha, len(doc), now(), args.kind),
+        "INSERT INTO source_file(id,course_id,path,sha256,pages,imported_at,kind,doc_type) VALUES(?,?,?,?,?,?,?,?)",
+        (fid, course_id, str(path), sha, len(doc), now(), args.kind, args.doc_type),
     )
 
     # 1) 存页 + 抽图

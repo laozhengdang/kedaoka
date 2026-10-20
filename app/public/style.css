@@ -451,3 +451,33 @@ html[data-theme="dark"] .dia-node { color: #e7e7e3; }
   font-size: 10px; line-height: 1; padding: 2px 4px; border-radius: 4px;
   background: var(--accent-soft); color: var(--accent); margin-left: 6px;
 }
+
+/* ---------- 模拟卷：答题卡与解析 ---------- */
+.exam-layout { display: grid; grid-template-columns: 1fr 220px; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .exam-layout { grid-template-columns: 1fr; } }
+.exam-card-grid { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.exam-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.exam-cell {
+  aspect-ratio: 1 / 1; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer;
+}
+.exam-cell.ok { background: #d6efdf; border-color: #8fcfa9; color: #12653a; }
+.exam-cell.bad { background: #fbdada; border-color: #eaa5a5; color: #9c1c1c; }
+.exam-cell.flag { box-shadow: inset 0 0 0 2px #f0b429; }
+.exam-cell.cur { outline: 2px solid var(--accent); }
+html[data-theme="dark"] .exam-cell.ok { background: #1d3a2a; color: #a9e3c0; border-color: #2f6a4a; }
+html[data-theme="dark"] .exam-cell.bad { background: #3c1f1f; color: #f0a9a9; border-color: #7d3a3a; }
+
+.exam-row { border-left: 3px solid var(--line); padding: 8px 0 8px 12px; margin: 10px 0; }
+.exam-row.ok { border-left-color: #4caf78; }
+.exam-row.bad { border-left-color: #e06a6a; }
+.exam-row-head { display: flex; align-items: center; gap: 8px; }
+.exam-no {
+  width: 22px; height: 22px; flex: 0 0 22px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 12px; line-height: 22px; text-align: center;
+}
+.exam-row-head .t { font-family: var(--serif); font-size: 16px; }
+.exam-row-head .tag { margin-left: auto; font-size: 12px; color: var(--muted); }
+.exam-row-body { margin-top: 4px; color: #555; font-size: 14px; line-height: 1.7; }
+html[data-theme="dark"] .exam-row-body { color: #c9c9c4; }

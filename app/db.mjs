@@ -1,4 +1,4 @@
-// db.mjs —— 数据库：建表 + 迁移 + 常用操作
+﻿// db.mjs —— 数据库：建表 + 迁移 + 常用操作
 // 用 Node 24 内置的 node:sqlite，不需要编译任何原生模块。
 
 import { DatabaseSync } from 'node:sqlite';
@@ -154,6 +154,19 @@ CREATE TABLE IF NOT EXISTS card_diagram (
   PRIMARY KEY (card_id, diagram_id)
 );
 
+-- 模拟卷 / 抽检的一次作答记录（错题本靠它）
+CREATE TABLE IF NOT EXISTS exam_attempt (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  scope TEXT,
+  total INTEGER NOT NULL DEFAULT 0,
+  right_count INTEGER NOT NULL DEFAULT 0,
+  minutes INTEGER NOT NULL DEFAULT 0,
+  used_sec INTEGER NOT NULL DEFAULT 0,
+  answers TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
+
 -- P-1 学习偏好：全局，跨课程
 CREATE TABLE IF NOT EXISTS profile (key TEXT PRIMARY KEY, value TEXT);
 `;
@@ -163,6 +176,7 @@ ensureColumn('card', 'file_id', 'file_id TEXT');
 ensureColumn('source_file', 'kind', "kind TEXT NOT NULL DEFAULT 'theory'");
 // 批次管理：移除某一批课件时把 active 置 0，不删数据（可恢复）
 ensureColumn('source_file', 'active', 'active INTEGER NOT NULL DEFAULT 1');
+ensureColumn('source_file', 'doc_type', "doc_type TEXT NOT NULL DEFAULT 'ppt'");
 // 每个专业可以有自己的"术语范围"提示词（AI 生成，存在 profession.term_hint）
 ensureColumn('profession', 'term_hint', 'term_hint TEXT');
 

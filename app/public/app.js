@@ -1,4 +1,4 @@
-// app.js —— 前端（原生 JS，无构建）
+﻿// app.js —— 前端（原生 JS，无构建）
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, html) => {
@@ -555,6 +555,7 @@ async function route() {
   if (parts[0] === 'exam' && parts[1]) return viewExam(parts[1]);
   if (parts[0] === 'diagram' && parts[1]) return viewDiagram(parts[1], parts[2] || '');
   if (parts[0] === 'spot' && parts[1]) return viewSpot(parts[1]);
+  if (parts[0] === 'wrong' && parts[1]) return viewWrong(parts[1]);
   if (parts[0] === 'batches' && parts[1]) return viewBatches(parts[1]);
   if (parts[0] === 'broken' && parts[1]) return viewBroken(parts[1]);
   if (parts[0] === 'outline' && parts[1]) return viewOutline(parts[1]);
@@ -618,11 +619,12 @@ async function viewCourse(id) {
       <button id="btnImportHere" class="small primary">＋ 导入课件到本学科</button>
       <button id="btnRefine" class="small">用 AI 重新整理术语</button>
       <button id="btnOutline" class="small">一键复习清单</button>
-      <button id="btnExam" class="small">模拟考</button>
+      <button id="btnExam" class="small">模拟卷</button>
       <button id="btnBroken" class="small">待修</button>
       <button id="btnDiagrams" class="small">机制图</button>
       <button id="btnSpot" class="small">考前抽检</button>
       <button id="btnBatches" class="small">课件批次</button>
+      <button id="btnWrong" class="small">错题本</button>
     </div>
     <div class="tabs">
       <div class="tab active" data-t="today">今天</div>
@@ -650,6 +652,8 @@ async function viewCourse(id) {
   if (bb) bb.onclick = () => { location.hash = `#/broken/${id}`; };
   const db2 = w.querySelector('#btnDiagrams');
   if (db2) db2.onclick = () => { location.hash = `#/diagram/${id}`; };
+  const wb = w.querySelector('#btnWrong');
+  if (wb) wb.onclick = () => { location.hash = `#/wrong/${id}`; };
   const sp = w.querySelector('#btnSpot');
   if (sp) sp.onclick = () => { location.hash = `#/spot/${id}`; };
   const bt = w.querySelector('#btnBatches');
@@ -938,40 +942,120 @@ window.addEventListener('keydown', (e) => {
 async function viewExam(courseId) {
   STATE.current = courseId;
   renderSidebar();
-  const q = Number(new URLSearchParams((location.hash.split('?')[1] || '')).get('n')) || 20;
-  const d = await api('GET', `/api/exam/${courseId}?n=${q}`);
+  const cname = (STATE.courses.find((x) => x.id === courseId) || {}).name || '';
+  const ch = await api('GET', `/api/chapters/${courseId}`);
   const m = $('#main');
   m.innerHTML = '';
   const w = el('div', 'wrap');
-  if (!d.cards.length) {
-    w.innerHTML = `<h1>模拟考</h1><p class="sub">这门课还没有可考的卡片。</p>`;
-    m.appendChild(w);
-    return;
-  }
+  m.appendChild(w);
+
+  // ---------- 第一步：配置 ----------
+  let scope = '';
+  let count = 20;
+  let mins = 0;
+  w.innerHTML = `
+    <div class="row" style="margin-bottom:10px">
+      <button class="ghost small" id="exBack">← 返回课程</button>
+    </div>
+    <h1>模拟卷 · ${esc(cname)}</h1>
+    <div class="detail">
+      <div class="row" style="align-items:center;gap:10px;margin-bottom:14px">
+        <label style="width:64px">范围</label>
+        <select id="exScope" class="tool-select" style="max-width:420px">
+          <option value="">整门课</option>
+          ${ch.chapters.map((c) => `<option value="${esc(c.name)}">${esc(c.name)}（${c.n} 个概念）</option>`).join('')}
+        </select>
+      </div>
+      <div class="row" style="align-items:center;gap:10px;margin-bottom:14px">
+        <label style="width:64px">题量</label>
+        <span id="exCountPick">
+          <button class="small" data-n="10">10 题</button>
+          <button class="small primary" data-n="20">20 题</button>
+          <button class="small" data-n="30">30 题</button>
+          <button class="small" data-n="50">50 题</button>
+        </span>
+      </div>
+      <div class="row" style="align-items:center;gap:10px">
+        <label style="width:64px">时长</label>
+        <span id="exMinPick">
+          <button class="small primary" data-m="0">不限时</button>
+          <button class="small" data-m="20">20 分钟</button>
+          <button class="small" data-m="40">40 分钟</button>
+          <button class="small" data-m="60">60 分钟</button>
+        </span>
+      </div>
+      <p class="hint" style="margin-top:12px">答题时可以先标疑题，最后一起看。交卷后每道题都会给解析。</p>
+    </div>
+    <div class="row" style="margin-top:18px">
+      <button id="exStart" class="primary">开始做题</button>
+    </div>`;
+  $('#exBack').onclick = () => { location.hash = `#/course/${courseId}`; };
+  w.querySelectorAll('#exCountPick [data-n]').forEach((b) => {
+    b.onclick = () => {
+      count = Number(b.dataset.n);
+      w.querySelectorAll('#exCountPick [data-n]').forEach((x) => x.classList.toggle('primary', x === b));
+    };
+  });
+  w.querySelectorAll('#exMinPick [data-m]').forEach((b) => {
+    b.onclick = () => {
+      mins = Number(b.dataset.m);
+      w.querySelectorAll('#exMinPick [data-m]').forEach((x) => x.classList.toggle('primary', x === b));
+    };
+  });
+  $('#exStart').onclick = async () => {
+    scope = $('#exScope').value;
+    const d = await api('POST', `/api/exam/${courseId}/start`, { n: count, chapter: scope, minutes: mins });
+    runExamSheet(courseId, cname, d, w);
+  };
+}
+
+// ---------- 第二步：作答（答题卡 + 倒计时） ----------
+function runExamSheet(courseId, cname, d, w) {
+  const cards = d.cards;
+  const marks = new Array(cards.length).fill(null);  // true/false/null
+  const flags = new Array(cards.length).fill(false); // 疑题
   let i = 0;
   let revealed = false;
-  const marks = [];   // true=对 false=错
+  const t0 = Date.now();
 
   w.innerHTML = `
     <div class="row" style="justify-content:space-between;align-items:center">
-      <span class="sub" id="exCount"></span>
-      <button class="ghost small" id="exQuit">退出考试</button>
+      <span class="sub" id="exProg"></span>
+      <span class="row" style="gap:12px;align-items:center">
+        <span class="timer" id="exClock">—</span>
+        <button class="ghost small" id="exQuit">交卷并退出</button>
+      </span>
     </div>
-    <div class="today-card exam-card">
-      <div class="ex-term" id="exFront"></div>
-      <div class="ex-ans" id="exBack"></div>
-      <div class="sub" id="exSrc"></div>
+    <div class="exam-layout">
+      <div class="today-card exam-card">
+        <div class="ex-term" id="exFront"></div>
+        <div class="ex-ans" id="exBack"></div>
+        <div class="sub" id="exSrc"></div>
+      </div>
+      <div class="exam-card-grid" id="exGrid"></div>
     </div>
-    <div class="row" style="justify-content:center;margin-top:18px">
+    <div class="row" style="justify-content:center;margin-top:16px">
       <button id="exShow" class="primary">看答案（空格）</button>
       <button id="exRight" class="small" style="display:none">答对了（←）</button>
       <button id="exWrong" class="small" style="display:none">答错了（→）</button>
+      <button id="exFlag" class="ghost small">标记疑题</button>
     </div>`;
-  m.appendChild(w);
+
+  const deadline = d.minutes ? t0 + d.minutes * 60000 : 0;
+  const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const clock = setInterval(() => {
+    const el2 = $('#exClock');
+    if (!el2) { clearInterval(clock); return; }
+    if (!deadline) { el2.textContent = '不限时'; return; }
+    const left = Math.max(0, Math.floor((deadline - Date.now()) / 1000));
+    el2.textContent = fmt(left);
+    el2.classList.toggle('over', left < 300);
+    if (left === 0) { clearInterval(clock); toast('时间到了，可以直接交卷'); }
+  }, 500);
 
   const paint = () => {
-    const c = d.cards[i];
-    $('#exCount').textContent = `${i + 1} / ${d.cards.length}　答对 ${marks.filter(Boolean).length}`;
+    const c = cards[i];
+    $('#exProg').textContent = `${i + 1} / ${cards.length}　答对 ${marks.filter((x) => x === true).length}　标记 ${flags.filter(Boolean).length}`;
     $('#exFront').textContent = c.front;
     $('#exBack').textContent = c.back || '（没有释义）';
     $('#exBack').style.visibility = revealed ? 'visible' : 'hidden';
@@ -979,49 +1063,173 @@ async function viewExam(courseId) {
     $('#exShow').style.display = revealed ? 'none' : '';
     $('#exRight').style.display = revealed ? '' : 'none';
     $('#exWrong').style.display = revealed ? '' : 'none';
+    $('#exFlag').textContent = flags[i] ? '取消标记' : '标记疑题';
+
+    // 答题卡
+    const grid = $('#exGrid');
+    grid.innerHTML = '<div class="sub" style="margin-bottom:6px">答题卡</div>';
+    const box = el('div', 'exam-grid');
+    cards.forEach((c2, k) => {
+      const b = el('button', 'exam-cell');
+      b.textContent = String(k + 1);
+      if (marks[k] === true) b.classList.add('ok');
+      if (marks[k] === false) b.classList.add('bad');
+      if (flags[k]) b.classList.add('flag');
+      if (k === i) b.classList.add('cur');
+      b.onclick = () => { i = k; revealed = marks[k] !== null; paint(); };
+      box.appendChild(b);
+    });
+    grid.appendChild(box);
+    const submit = el('button', 'primary small', '交卷');
+    submit.style.marginTop = '10px';
+    submit.onclick = () => finishExam();
+    grid.appendChild(submit);
   };
 
   const answer = async (ok) => {
-    const c = d.cards[i];
-    marks.push(ok);
-    await api('POST', `/api/exam/${courseId}/result`, { cardId: c.id, correct: ok });
-    i += 1;
+    const c = cards[i];
+    marks[i] = ok;
+    await api('POST', '/api/exam/answer', { attemptId: d.attemptId, cardId: c.id, correct: ok });
+    // 跳到下一道没答的题
+    const next = marks.findIndex((x, k) => x === null && k > i);
+    const anyUndone = marks.findIndex((x) => x === null);
+    i = next >= 0 ? next : (anyUndone >= 0 ? anyUndone : i);
     revealed = false;
-    if (i >= d.cards.length) return finish();
+    if (marks.every((x) => x !== null)) return finishExam();
     paint();
   };
 
-  const finish = () => {
-    const right = marks.filter(Boolean).length;
-    w.innerHTML = `
-      <h1>考完了</h1>
-      <p class="sub">${esc(d.course)} · ${d.cards.length} 题</p>
-      <div class="today-card" style="text-align:center">
-        <div class="big-num">${right} / ${d.cards.length}</div>
-        <div class="sub">正确率 ${Math.round(right / d.cards.length * 100)}%</div>
-        <p class="hint" style="margin-top:10px">答错的题已经按「完全不记得」重置，明天会重新出现。</p>
-      </div>
-      <div class="row" style="justify-content:center;margin-top:16px">
-        <button id="exAgain" class="primary small">再来一套</button>
-        <button id="exBack" class="ghost small">回课程</button>
-      </div>`;
-    $('#exAgain').onclick = () => { location.hash = `#/exam/${courseId}`; location.reload(); };
-    $('#exBack').onclick = () => { location.hash = `#/course/${courseId}`; };
+  const finishExam = async () => {
+    clearInterval(clock);
+    const used = Math.round((Date.now() - t0) / 60000);
+    const r = await api('POST', '/api/exam/finish', { attemptId: d.attemptId, minutes: used });
+    showExamResult(courseId, cname, r, w, used, d.scope);
   };
 
   $('#exShow').onclick = () => { revealed = true; paint(); };
   $('#exRight').onclick = () => answer(true);
   $('#exWrong').onclick = () => answer(false);
-  $('#exQuit').onclick = () => { location.hash = `#/course/${courseId}`; };
+  $('#exFlag').onclick = () => { flags[i] = !flags[i]; paint(); };
+  $('#exQuit').onclick = () => finishExam();
 
   const key = (e) => {
     if (!document.body.contains(w)) { window.removeEventListener('keydown', key); return; }
     if (e.key === ' ') { e.preventDefault(); if (!revealed) { revealed = true; paint(); } }
     if (e.key === 'ArrowLeft' && revealed) answer(true);
     if (e.key === 'ArrowRight' && revealed) answer(false);
+    if (e.key === 'f') { e.preventDefault(); flags[i] = !flags[i]; paint(); }
   };
   window.addEventListener('keydown', key);
   paint();
+}
+
+// ---------- 第三步：成绩与逐题解析 ----------
+function showExamResult(courseId, cname, r, w, usedMin, scope) {
+  const pct = r.total ? Math.round((r.right / r.total) * 100) : 0;
+  w.innerHTML = `
+    <h1>交卷 · ${pct} 分</h1>
+    <p class="sub">${esc(cname)} · ${esc(scope || '整门课')} · ${r.total} 题 · 用时约 ${usedMin} 分钟</p>
+    <div class="today-card" style="text-align:center">
+      <div class="big-num">${r.right} / ${r.total}</div>
+      <div class="sub">答对 ${r.right} 题，答错 ${r.total - r.right} 题</div>
+      <p class="hint" style="margin-top:10px">答错的已按「完全不记得」打回复习队列，明天会重新出现。</p>
+    </div>
+    <h2 style="margin-top:24px">逐题解析</h2>
+    <div class="detail" id="exDetail"></div>
+    <div class="row" style="justify-content:center;margin-top:18px">
+      <button id="exAgain" class="primary small">再考一套</button>
+      <button id="exWrongBook" class="small">看错题本</button>
+      <button id="exBackC" class="ghost small">回课程</button>
+    </div>`;
+  const box = $('#exDetail');
+  r.detail.forEach((x, k) => {
+    const ok = x.correct;
+    const row = el('div', 'exam-row ' + (ok ? 'ok' : 'bad'));
+    row.innerHTML = `
+      <div class="exam-row-head">
+        <span class="exam-no">${k + 1}</span>
+        <span class="t">${esc(x.card ? x.card.front : '（卡片已删除）')}</span>
+        <span class="tag">${ok ? '对' : '错'}</span>
+      </div>
+      <div class="exam-row-body">${esc(x.card ? (x.card.back || '（没有释义）') : '')}</div>`;
+    box.appendChild(row);
+  });
+  $('#exAgain').onclick = () => viewExam(courseId);
+  $('#exWrongBook').onclick = () => { location.hash = `#/wrong/${courseId}`; };
+  $('#exBackC').onclick = () => { location.hash = `#/course/${courseId}`; };
+}
+
+// ---------------- 错题本 ----------------
+async function viewWrong(courseId) {
+  STATE.current = courseId;
+  renderSidebar();
+  const cname = (STATE.courses.find((x) => x.id === courseId) || {}).name || '';
+  const d = await api('GET', `/api/wrong/${courseId}`);
+  const m = $('#main');
+  m.innerHTML = '';
+  const w = el('div', 'wrap');
+  w.innerHTML = `
+    <div class="row" style="margin-bottom:10px">
+      <button class="ghost small" id="wbBack">← 返回课程</button>
+    </div>
+    <h1>错题本 · ${esc(cname)}</h1>
+    <p class="sub">最近 30 次模拟卷里做错过的题，错得多的排前面。</p>
+    <div class="detail" id="wbList"></div>`;
+  m.appendChild(w);
+  $('#wbBack').onclick = () => { location.hash = `#/course/${courseId}`; };
+  const list = $('#wbList');
+  if (!d.total) { list.innerHTML = '<p class="sub">还没有错题。去考一次试试。</p>'; return; }
+  const cards = [...d.cards].sort((a, b) => b.times - a.times);
+  for (const c of cards) {
+    const row = el('div', 'cardrow');
+    row.innerHTML = `<span class="t">${esc(c.front)}</span>
+      <span class="pg">错 ${c.times} 次 · 第 ${c.source_page} 页</span>`;
+    row.onclick = () => { location.hash = `#/card/${c.id}`; };
+    list.appendChild(row);
+  }
+}
+
+// ---------------- 单张自测 / 查看原文 ----------------
+function quizSingleCard(c, host) {
+  const box = el('div', 'modal');
+  box.innerHTML = `
+    <div class="modal-box" style="width:560px;text-align:center">
+      <div class="ex-term" style="font-size:34px">${esc(c.front)}</div>
+      <div class="ex-ans" id="qOneBack" style="visibility:hidden">${esc(c.back || '（没有释义）')}</div>
+      <div class="row" style="justify-content:center;margin-top:18px">
+        <button id="qShow" class="primary">看答案</button>
+        <button id="qRight" class="small" style="display:none">记得</button>
+        <button id="qWrong" class="small" style="display:none">不记得</button>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+  $('#qShow').onclick = () => {
+    $('#qOneBack').style.visibility = 'visible';
+    $('#qShow').style.display = 'none';
+    $('#qRight').style.display = '';
+    $('#qWrong').style.display = '';
+  };
+  const rate = async (ok) => {
+    await api('POST', '/api/review', { cardId: c.id, rating: ok ? 2 : 4 });
+    toast(ok ? '记了「记得」' : '已按「完全不会」重置');
+    box.remove();
+  };
+  $('#qRight').onclick = () => rate(true);
+  $('#qWrong').onclick = () => rate(false);
+}
+
+async function showPageText(cardId) {
+  const d = await api('GET', `/api/page-text/${cardId}`);
+  const box = el('div', 'modal');
+  box.innerHTML = `
+    <div class="modal-box" style="width:680px">
+      <h3>原文 · 第 ${d.page} 页</h3>
+      <p class="sub">${d.chapter ? esc(d.chapter) + ' · ' : ''}${esc(d.fileName)}</p>
+      <pre class="log" style="max-height:52vh;white-space:pre-wrap">${esc(d.text || '（这一页没抽到文字，可能是图片页）')}</pre>
+      <div class="row"><button id="pgClose" class="ghost">关闭</button></div>
+    </div>`;
+  document.body.appendChild(box);
+  $('#pgClose').onclick = () => box.remove();
 }
 
 // ---------------- 待修队列 ----------------
@@ -1298,8 +1506,9 @@ async function viewBatches(courseId) {
   if (!d.total) { list.innerHTML = '<p class="sub">这门课还没有导入过课件。</p>'; return; }
   for (const b of d.batches) {
     const row = el('div', 'cardrow');
+    const docLabel = { ppt: '授课课件', exam: '题库真题', notes: '复习资料', syllabus: '考纲提纲' }[b.doc_type] || '授课课件';
     row.innerHTML = `<span class="t">${esc(b.fileName)}</span>
-      <span class="pg">${b.kind === 'lab' ? '实验课' : '理论课'} · ${b.pages} 页 · ${b.cards} 张卡${b.active ? '' : ' · 已移除'}</span>`;
+      <span class="pg">${docLabel} · ${b.kind === 'lab' ? '实验课' : '理论课'} · ${b.pages} 页 · ${b.cards} 张卡${b.active ? '' : ' · 已移除'}</span>`;
     const btn = el('button', b.active ? 'ghost small' : 'small', b.active ? '移除' : '恢复');
     btn.onclick = async () => {
       if (b.active) {
@@ -1623,6 +1832,9 @@ async function viewCard(id) {
       <div class="row" style="margin-top:18px">
         <button id="btnEdit" class="small">修改</button>
         <button id="btnMerge" class="small">并入其它卡（别名合并）</button>
+        <button id="btnToQueue" class="small">加入今天的队列</button>
+        <button id="btnQuizOne" class="small">就这一张，考我</button>
+        <button id="btnShowPage" class="ghost small">查看原文</button>
       </div>
       <div id="mergeBox" class="hidden" style="margin-top:16px">
         <p class="hint">输入另一张卡的名字，把它并到那张上去。原标题会存成别名，关系也会一起搬过去。</p>
@@ -1643,6 +1855,13 @@ async function viewCard(id) {
   w.querySelectorAll('[data-go]').forEach((a) => {
     a.onclick = () => { location.hash = `#/card/${a.dataset.go}`; };
   });
+  $('#btnToQueue').onclick = async () => {
+    const r = await api('POST', `/api/card/${c.id}/queue`, {});
+    toast(r.already ? '这张已经在今天的队列里了' : '已加入今天的队列');
+  };
+  $('#btnQuizOne').onclick = () => quizSingleCard(c, w);
+  $('#btnShowPage').onclick = () => showPageText(c.id);
+
   const backBtn = $('#btnBack');
   if (backBtn) backBtn.onclick = () => { location.hash = `#/browse/${c.course_id}`; };
 
@@ -2130,9 +2349,10 @@ async function doImport() {
   const courseName = $('#importCourse').value.trim();
   if (!file || !courseName) return toast('路径和课程名都要填');
   const kind = document.querySelector('input[name="kind"]:checked')?.value || 'theory';
+  const docType = $('#importDocType') ? $('#importDocType').value : 'ppt';
   $('#importGo').disabled = true;
-  $('#importLog').textContent = `解析中…（${kind === 'lab' ? '实验课' : '理论课'}，无 AI，纯本地）`;
-  const { job } = await api('POST', '/api/import', { file, courseName, kind });
+  $('#importLog').textContent = `解析中…（${kind === 'lab' ? '实验课' : '理论课'} · ${({ppt:'授课课件',exam:'题库真题',notes:'复习资料',syllabus:'考纲提纲'})[docType] || '授课课件'}，无 AI，纯本地）`;
+  const { job } = await api('POST', '/api/import', { file, courseName, kind, docType });
   const poll = setInterval(async () => {
     const j = await api('GET', `/api/job/${job}`);
     $('#importLog').textContent = j.log || '…';
