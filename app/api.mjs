@@ -1,4 +1,4 @@
-// api.mjs —— 所有业务逻辑都在这里，服务端和桌面端共用同一份。
+﻿// api.mjs —— 所有业务逻辑都在这里，服务端和桌面端共用同一份。
 // server.mjs（网页版）调 callApi；electron/main.mjs（桌面版）也调 callApi。
 
 import { spawn } from 'node:child_process';
@@ -1018,6 +1018,12 @@ const handlers = {
     const c = saveAiConfig(b || {});
     return { ok: true, baseUrl: c.baseUrl, model: c.model, hasKey: Boolean(c.apiKey), keyMask: maskKey(c.apiKey) };
   },
+  'GET /api/ai/balance': async (p) => {
+    const { fetchBalance, getUsageSummary } = await import('./ai.mjs');
+    const bal = await fetchBalance(p.query?.force === '1');
+    return { ...bal, usage: getUsageSummary() };
+  },
+
   'POST /api/ai/test': async () => {
     const { testConnection } = await import('./ai.mjs');
     return testConnection();

@@ -529,3 +529,16 @@ html[data-theme="dark"] .streak-badge { background: #3a2f14; border-color: #6b57
   border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer;
 }
 .focus-mini.primary { border-color: var(--accent); color: var(--accent); }
+
+/* 余额显示 */
+.tool-balance {
+  display: flex; justify-content: space-between; align-items: center;
+  width: 100%; padding: 7px 10px; margin-bottom: 6px;
+  background: transparent; border: 1px dashed var(--line); border-radius: 8px;
+  font: inherit; font-size: 12px; color: var(--muted); cursor: pointer;
+}
+.tool-balance:hover { border-color: var(--accent); color: var(--ink); }
+.tool-balance.low { border-color: #e0a04a; color: #a2620a; }
+.tool-balance.dead { color: var(--muted); }
+#balanceText { font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: var(--ink); }
+.tool-balance.low #balanceText { color: #a2620a; }

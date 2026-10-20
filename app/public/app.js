@@ -138,6 +138,7 @@ function bindTools() {
   bindFocus();
   bindThemeModal();
   bindNewProf();
+  bindBalance();
   document.querySelectorAll('#focusPresets [data-m]').forEach((b) => {
     b.onclick = () => {
       const m = Number(b.dataset.m);
@@ -160,6 +161,48 @@ function bindTools() {
     setInterval(() => { if (FOCUS.running) paintClockGlobal(); }, 500);
   }
   paintClockGlobal();
+}
+
+// ---------- 余额显示 ----------
+async function loadBalance(force = false) {
+  const btn = $('#btnBalance');
+  const text = $('#balanceText');
+  if (!btn || !text) return;
+  try {
+    const b = await api('GET', `/api/ai/balance${force ? '?force=1' : ''}`);
+    btn.classList.remove('low', 'dead');
+    if (!b.supported) {
+      btn.classList.add('dead');
+      text.textContent = '未接入';
+      btn.title = b.reason || '未配置';
+      return;
+    }
+    const money = Number(b.total || 0);
+    text.textContent = `${b.currency === 'CNY' ? '¥' : ''}${money.toFixed(2)}`;
+    if (money < 1) {
+      btn.classList.add('low');
+      if (!window.__lowWarned) {
+        window.__lowWarned = true;
+        toast(`温馨提示：你的余额只剩 ${money.toFixed(2)} 元了`);
+      }
+    }
+    btn.title = `可用 ${money.toFixed(2)} 元 · 今日 ${b.usage.today.calls} 次调用 · 点一下刷新`;
+  } catch (e) {
+    btn.classList.add('dead');
+    text.textContent = '查不到';
+    btn.title = '查余额失败：' + (e.message || e);
+  }
+}
+
+function bindBalance() {
+  const btn = $('#btnBalance');
+  if (!btn) return;
+  btn.onclick = async () => {
+    const text = $('#balanceText');
+    if (text) text.textContent = '…';
+    await loadBalance(true);
+  };
+  loadBalance(false);
 }
 
 // ---------- 专注计时器 ----------
@@ -2551,6 +2594,7 @@ async function renderAiPanel(cfg) {
           <div class="sub">${esc(cfg.model)} · ${esc(cfg.baseUrl)} · 密钥 ${esc(cfg.keyMask || '已保存')}</div>
         </div>
       </div>
+      <div id="aiBalance" class="sub" style="margin:10px 0 2px">正在查余额…</div>
       <div class="row" style="margin-top:14px">
         <button id="aiRecheck" class="primary small">再测一次</button>
         <button id="aiEdit" class="small">修改配置</button>
@@ -2558,6 +2602,18 @@ async function renderAiPanel(cfg) {
       </div>
       <pre id="aiTestOut" class="log hidden"></pre>`;
     $('#aiRecheck').onclick = () => runAiTest(cfg);
+    // 余额明细
+    api('GET', '/api/ai/balance').then((b) => {
+      const el2 = $('#aiBalance');
+      if (!el2) return;
+      if (!b.supported) { el2.textContent = b.reason || '这个接口查不到余额'; return; }
+      el2.innerHTML = `可用余额 <b>${b.total.toFixed(2)}</b> ${esc(b.currency)}`
+        + ` · 今日调用 <b>${b.usage.today.calls}</b> 次`
+        + ` · 累计 <b>${b.usage.all.c}</b> 次`;
+    }).catch(() => {
+      const el2 = $('#aiBalance');
+      if (el2) el2.textContent = '余额查不到（不影响使用）';
+    });
     $('#aiEdit').onclick = () => renderAiPanel({ ...cfg, hasKey: cfg.hasKey, status: 'editing' });
     $('#aiGoCourse').onclick = () => { location.hash = '#/'; };
     return;

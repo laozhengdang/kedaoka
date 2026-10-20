@@ -1,4 +1,4 @@
-// ai.mjs —— 接大模型：配置、调用、把逐页原文变成"术语 + 定义 + 关系"
+﻿// ai.mjs —— 接大模型：配置、调用、把逐页原文变成"术语 + 定义 + 关系"
 //
 // 设计要点（对应文档 D61 / D82）：
 //   - 只支持 OpenAI 兼容的 /chat/completions，DeepSeek / Kimi / 智谱 / OpenAI 都能填
@@ -86,6 +86,7 @@ async function chat(cfg, messages, { maxTokens = 2000, temperature = 0.1 } = {})
   const j = await res.json();
   const text = j?.choices?.[0]?.message?.content ?? '';
   if (text) cachePut(hash, text, cfg.model);
+  recordUsage(j?.usage);
   return { text, cached: false, usage: j?.usage };
 }
 
@@ -100,7 +101,74 @@ export async function testConnection() {
   return { ok: true, cached, sample: text.slice(0, 80), model: cfg.model, baseUrl: cfg.baseUrl };
 }
 
-// ---------------- 提示词 ----------------
+// ---------------- 余额查询 ----------------
+// DeepSeek 有官方接口 GET /user/balance；其它 OpenAI 兼容家的余额一般要走网页登录态，
+// 拿 API Key 查不到，所以那些就直接说"不支持"。
+let balanceCache = { at: 0, data: null };
+
+export async function fetchBalance(force = false) {
+  const cfg = getAiConfig();
+  if (!cfg.apiKey) return { supported: false, reason: '还没填 API Key' };
+  if (Date.now() - balanceCache.at < 60_000 && !force && balanceCache.data) return balanceCache.data;
+
+  const base = cfg.baseUrl.replace(/\/$/, '');
+  if (!/deepseek/i.test(base)) {
+    return {
+      supported: false,
+      reason: '这个接口不提供余额查询（DeepSeek 才能查）',
+      baseUrl: cfg.baseUrl,
+    };
+  }
+  const root = base.replace(/\/v1$/, '');
+  const res = await fetch(`${root}/user/balance`, {
+    headers: { authorization: `Bearer ${cfg.apiKey}`, accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`查余额失败 ${res.status}：${body.slice(0, 200)}`);
+  }
+  const j = await res.json();
+  const info = (j.balance_infos || [])[0] || {};
+  const data = {
+    supported: true,
+    available: Boolean(j.is_available),
+    currency: info.currency || 'CNY',
+    total: Number(info.total_balance || 0),
+    granted: Number(info.granted_balance || 0),
+    topped: Number(info.topped_up_balance || 0),
+    at: new Date().toISOString(),
+  };
+  balanceCache = { at: Date.now(), data };
+  return data;
+}
+
+// 记录每次调用的 token 用量（估算花销用，不影响主流程）
+db.exec(`CREATE TABLE IF NOT EXISTS ai_usage (
+  date TEXT NOT NULL,
+  calls INTEGER NOT NULL DEFAULT 0,
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (date)
+)`);
+
+function recordUsage(usage) {
+  if (!usage) return;
+  const d = new Date().toISOString().slice(0, 10);
+  try {
+    db.prepare(`INSERT INTO ai_usage(date,calls,prompt_tokens,completion_tokens) VALUES(?,1,?,?)
+      ON CONFLICT(date) DO UPDATE SET calls=calls+1,
+        prompt_tokens=prompt_tokens+excluded.prompt_tokens,
+        completion_tokens=completion_tokens+excluded.completion_tokens`)
+      .run(d, Number(usage.prompt_tokens || 0), Number(usage.completion_tokens || 0));
+  } catch { /* 记不上就算了 */ }
+}
+
+export function getUsageSummary() {
+  const d = new Date().toISOString().slice(0, 10);
+  const today = db.prepare('SELECT * FROM ai_usage WHERE date=?').get(d) || { calls: 0, prompt_tokens: 0, completion_tokens: 0 };
+  const all = db.prepare('SELECT COALESCE(SUM(calls),0) c, COALESCE(SUM(prompt_tokens+completion_tokens),0) t FROM ai_usage').get();
+  return { today, all };
+}
 // 专业方向会改变提示词：兽医学/草业/动科 各自举的例子不一样，
 // 否则模型会把"动物医学"的常识硬套到草业课上。
 const MAJOR_HINT = {
@@ -408,6 +476,7 @@ async function chatText(cfg, messages, { maxTokens = 2000, temperature = 0.3 } =
     throw new Error(`API ${res.status}: ${body.slice(0, 300)}`);
   }
   const j = await res.json();
+  recordUsage(j?.usage);
   return { text: j?.choices?.[0]?.message?.content || '' };
 }
 
