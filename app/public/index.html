@@ -13,7 +13,7 @@
     <div class="brand">妙妙小工具</div>
     <div class="courses" id="courseList"></div>
     <div class="side-foot">
-      <button id="btnImport" class="ghost">＋ 导入课件</button>
+      <button id="btnNewCourse" class="ghost">＋ 新建学科</button>
       <button id="btnSettings" class="ghost">设置</button>
       <button id="btnCollapse" class="ghost" title="收起侧栏">«</button>
     </div>
@@ -21,13 +21,27 @@
   <main id="main"></main>
 </div>
 
-<!-- 导入面板 -->
+<!-- 新建学科 -->
+<div id="newCourseModal" class="modal hidden">
+  <div class="modal-box">
+    <h3>新建学科</h3>
+    <p class="hint">先建一个空学科，再往里导入课件。每个学科的知识库是独立的。</p>
+    <input id="newCourseName" placeholder="学科名，例如 兽医免疫学">
+    <input id="newCourseProf" placeholder="所属专业（默认 兽医学）">
+    <div class="row">
+      <button id="newCourseGo" class="primary">创建</button>
+      <button id="newCourseClose" class="ghost">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导入课件（在某个学科里） -->
 <div id="importModal" class="modal hidden">
   <div class="modal-box">
-    <h3>导入课件</h3>
-    <p class="hint">本地路径（PDF）。解析不需要 API，纯本地跑。</p>
+    <h3 id="importTitle">导入课件</h3>
+    <p class="hint">本地路径（PDF / PPTX）。解析不需要 API，纯本地跑。</p>
     <input id="importPath" placeholder="C:\...\课件.pdf">
-    <input id="importCourse" placeholder="课程名，例如 免疫学">
+    <input id="importCourse" placeholder="学科名">
     <div class="row">
       <button id="importGo" class="primary">开始导入</button>
       <button id="importClose" class="ghost">关闭</button>

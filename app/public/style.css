@@ -233,3 +233,14 @@ textarea { min-height: 120px; font-family: var(--serif); }
 .tree-child { padding-left: 0; }
 .tree-root { margin-top: 10px; }
 .tree-root:first-child { margin-top: 0; }
+
+/* ---------- 复习清单 ---------- */
+.outline { font-family: var(--serif); line-height: 1.85; }
+.outline h2 { font-size: 22px; margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.outline h3 { font-size: 18px; margin: 22px 0 8px; color: var(--accent); }
+.outline h4 { font-size: 16px; margin: 16px 0 6px; }
+.outline ul { margin: 6px 0 6px 20px; padding: 0; }
+.outline li { margin: 4px 0; }
+.outline p { margin: 8px 0; }
+.outline b { color: #111; }
+.outline code { background: #f4f2ec; padding: 1px 5px; border-radius: 4px; font-size: 13px; }

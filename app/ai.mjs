@@ -237,6 +237,104 @@ async function reviewTerms(cfg, terms, chunks) {
   }
   return { kept: out, dropped };
 }
+
+// ---------------- 复习清单（一键生成） ----------------
+db.exec(`CREATE TABLE IF NOT EXISTS outline (
+  course_id TEXT PRIMARY KEY,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+)`);
+
+const outlineJobs = new Map();
+
+export function getOutlineJob(id) {
+  return outlineJobs.get(id) || { status: 'unknown' };
+}
+
+export function getSavedOutline(courseId) {
+  const r = db.prepare('SELECT content, created_at FROM outline WHERE course_id=?').get(courseId);
+  return r ? { content: r.content, createdAt: r.created_at } : { content: '', createdAt: '' };
+}
+
+const OUTLINE_SYSTEM = `你是动物医学专业的助教，正在给学生写"考前必备清单"。
+给你一门课的全部术语（按章节分组，每个词后面是课件里的解释）。
+请写一份可以直接打印背的复习清单，要求：
+
+1. 按章节顺序组织，用"## 第X章 / 章节名"做小标题。
+2. 每章下面用列表列出该章所有术语：**术语**：一句话解释（可压缩原文，但不能改变意思）。
+3. 每章末尾加一行"本章逻辑"：用一两句话把这一章的术语串起来（谁导致谁、谁包括谁、先做什么后做什么）。
+4. 全文最后加"## 融会贯通"：用 5~10 句话把整门课主线讲一遍，明确哪些是前置、哪些并列、哪些容易混淆。
+5. 只输出 Markdown 正文，不写客套话，不编造清单里没有的术语。`;
+
+export function startOutline(courseId) {
+  const id = uid('outline_');
+  const job = { id, status: 'running', log: [], content: '', error: '' };
+  outlineJobs.set(id, job);
+  (async () => {
+    const cfg = getAiConfig();
+    if (cfg.baseUrl !== 'mock' && !cfg.apiKey) throw new Error('还没配置 API Key');
+    const rows = db.prepare(`
+      SELECT c.front, c.back, c.importance, c.source_page, pg.chapter, sf.path AS file_path
+      FROM card c
+      LEFT JOIN page pg ON pg.page_no=c.source_page
+        AND pg.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
+      LEFT JOIN source_file sf ON sf.id=pg.file_id
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+      ORDER BY c.source_page`).all(courseId);
+    if (!rows.length) throw new Error('这门课还没有卡片，先导入并整理');
+
+    const byChapter = new Map();
+    for (const r of rows) {
+      const fn = r.file_path ? String(r.file_path).split(/[\\/]/).pop() : '';
+      const m = fn.match(/第[一二三四五六七八九十0-9]+[章节]/);
+      const fallback = fn.replace(/\.[^.]+$/, '').replace(/^[0-9０-９]+[-\s._、]*/, '').trim().slice(0, 24);
+      const ch = r.chapter || (m ? m[0] : fallback) || '未分章';
+      if (!byChapter.has(ch)) byChapter.set(ch, []);
+      byChapter.get(ch).push(r);
+    }
+    job.log.push(`共 ${rows.length} 个术语，分 ${byChapter.size} 章`);
+    let text = '';
+    for (const [ch, list] of byChapter) {
+      text += `## 章：${ch}\n`;
+      for (const r of list) text += `- ${r.front}：${(r.back || '').slice(0, 110)}\n`;
+      text += '\n';
+    }
+    const { text: out } = await chatText(cfg, [
+      { role: 'system', content: OUTLINE_SYSTEM },
+      { role: 'user', content: text.slice(0, 24000) },
+    ], { maxTokens: 4000 });
+    job.content = out;
+    db.prepare('INSERT OR REPLACE INTO outline(course_id,content,created_at) VALUES(?,?,?)')
+      .run(courseId, out, nowIso());
+    job.status = 'done';
+    job.log.push('清单已生成');
+  })().catch((e) => {
+    job.status = 'failed';
+    job.error = String((e && e.message) || e);
+    job.log.push('失败：' + job.error);
+  });
+  return id;
+}
+
+// 不走 JSON 模式的普通文本调用
+async function chatText(cfg, messages, { maxTokens = 2000, temperature = 0.3 } = {}) {
+  if (cfg.baseUrl === 'mock') {
+    return { text: '# （mock）复习清单\n\n## 第 1 章\n- 示例术语：示例解释\n' };
+  }
+  const url = `${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
+    body: JSON.stringify({ model: cfg.model, messages, temperature, max_tokens: maxTokens }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`API ${res.status}: ${body.slice(0, 300)}`);
+  }
+  const j = await res.json();
+  return { text: j?.choices?.[0]?.message?.content || '' };
+}
+
 const refineJobs = new Map();
 
 export function getRefineJob(id) {

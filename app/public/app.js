@@ -1,4 +1,4 @@
-// app.js —— 前端（原生 JS，无构建）
+﻿// app.js —— 前端（原生 JS，无构建）
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, html) => {
@@ -93,9 +93,38 @@ function bindChrome() {
     $('#sidebar').classList.toggle('collapsed');
   };
   $('#btnSettings').onclick = () => { location.hash = '#/settings'; };
-  $('#btnImport').onclick = openImport;
+  $('#btnNewCourse').onclick = openNewCourse;
+  $('#newCourseClose').onclick = () => $('#newCourseModal').classList.add('hidden');
+  $('#newCourseGo').onclick = doNewCourse;
   $('#importClose').onclick = () => $('#importModal').classList.add('hidden');
   $('#importGo').onclick = doImport;
+}
+
+// ---------- 新建学科 ----------
+function openNewCourse() {
+  $('#newCourseModal').classList.remove('hidden');
+  $('#newCourseName').value = '';
+  $('#newCourseProf').value = '';
+  $('#newCourseName').focus();
+}
+
+async function doNewCourse() {
+  const name = $('#newCourseName').value.trim();
+  if (!name) return toast('先填学科名');
+  try {
+    const r = await api('POST', '/api/course', {
+      name,
+      profession: $('#newCourseProf').value.trim() || '兽医学',
+    });
+    $('#newCourseModal').classList.add('hidden');
+    const b = await api('GET', '/api/bootstrap');
+    STATE.courses = b.courses;
+    renderSidebar();
+    toast(`已创建学科「${r.name}」`);
+    location.hash = `#/course/${r.id}`;
+  } catch (e) {
+    toast('创建失败：' + (e.message || e));
+  }
 }
 
 async function route() {
@@ -159,8 +188,12 @@ async function viewCourse(id) {
 
   w.innerHTML = `
     <h1>${esc(d.course.name)}</h1>
-    <p class="sub">共 ${d.course.cards || ''} 张卡 · ${d.course.mode === 'calc' ? '计算型' : '概念型'}
-      · <a id="btnRefine" style="color:var(--accent);cursor:pointer;border-bottom:1px dotted">用 AI 重新整理术语</a></p>
+    <p class="sub">共 ${d.course.cards || ''} 张卡 · ${d.course.mode === 'calc' ? '计算型' : '概念型'}</p>
+    <div class="row" style="margin:10px 0 4px">
+      <button id="btnImportHere" class="small primary">＋ 导入课件到本学科</button>
+      <button id="btnRefine" class="small">用 AI 重新整理术语</button>
+      <button id="btnOutline" class="small">一键复习清单</button>
+    </div>
     <div class="tabs">
       <div class="tab active" data-t="today">今天</div>
       <div class="tab" data-t="repo">仓库</div>
@@ -177,6 +210,10 @@ async function viewCourse(id) {
   });
   const rb = w.querySelector('#btnRefine');
   if (rb) rb.onclick = () => startRefine(id);
+  const ib = w.querySelector('#btnImportHere');
+  if (ib) ib.onclick = () => openImport(d.course.name);
+  const ob = w.querySelector('#btnOutline');
+  if (ob) ob.onclick = () => startOutline(id);
 
   const body = w.querySelector('#tabBody');
   if (!d.queue.total) {
@@ -558,9 +595,10 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false) {
     list.appendChild(el('div', 'group-title', `第 ${pg} 页`));
     for (const c of groups[pg]) {
       const row = el('div', 'cardrow');
+      const where = c.chapter ? `${esc(c.chapter)} · p${c.source_page}` : `p${c.source_page}`;
       row.innerHTML = `<span class="t">${esc(c.front)}</span>
         <span class="star">${stars(c.importance)}</span>
-        <span class="pg">${c.st === 'graduated' ? '已毕业' : c.st === 'new' ? '新' : c.st}</span>`;
+        <span class="pg">${where}</span>`;
       row.onclick = () => { location.hash = `#/card/${c.id}`; };
       list.appendChild(row);
     }
@@ -588,7 +626,7 @@ async function viewCard(id) {
         ${d.samePage.map((x) => `<a data-go="${x.id}">${esc(x.front)}</a>`).join(' · ')}</div>` : ''}
       ${d.relations.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">相关概念</div>
         ${d.relations.map((r) => `<a data-go="${r.from_card === c.id ? r.to_card : r.from_card}">${esc(r.from_card === c.id ? r.to_front : r.from_front)}</a>`).join(' · ')}</div>` : ''}
-      <div class="src">出处：第 ${c.source_page} 页 · origin=${c.origin}</div>
+      <div class="src">出处：${d.source && d.source.chapter ? esc(d.source.chapter) + ' · ' : ''}第 ${c.source_page} 页${d.source && d.source.fileName ? ' · ' + esc(d.source.fileName) : ''} · origin=${c.origin}</div>
       <div class="row" style="margin-top:18px">
         <button id="btnEdit" class="small">修改</button>
         <button id="btnStar" class="small">⭐ 加入今天的队列</button>
@@ -826,10 +864,105 @@ function showRefineBox(jobId) {
   }, 900);
 }
 
+// ---------------- 一键复习清单 ----------------
+async function startOutline(courseId) {
+  const cfg = await api('GET', '/api/ai/config');
+  if (!cfg.hasKey && cfg.baseUrl !== 'mock') {
+    toast('生成清单需要 AI，先去设置里填 Key');
+    location.hash = '#/settings';
+    return;
+  }
+  const { job } = await api('POST', `/api/outline/${courseId}`, {});
+  const box = el('div', 'modal');
+  box.innerHTML = `
+    <div class="modal-box" style="width:760px">
+      <h3>正在整理复习清单</h3>
+      <p class="hint">把整门课的术语按章节排好，并写一段"融会贯通"的主线。</p>
+      <pre class="log" id="olLog">准备中…</pre>
+      <div class="row"><button id="olClose" class="ghost small">关闭窗口（后台继续）</button></div>
+    </div>`;
+  document.body.appendChild(box);
+  $('#olClose').onclick = () => box.remove();
+  const timer = setInterval(async () => {
+    const j = await api('GET', `/api/outline-job/${job}`);
+    const log = $('#olLog');
+    if (log) log.textContent = (j.log || []).join('\n') || '准备中…';
+    if (j.status !== 'running') {
+      clearInterval(timer);
+      box.remove();
+      if (j.status === 'done') { toast('清单已生成'); viewOutline(courseId); }
+      else toast('生成失败：' + (j.error || '未知错误'));
+    }
+  }, 1200);
+}
+
+async function viewOutline(courseId) {
+  const d = await api('GET', `/api/outline/${courseId}`);
+  const cname = (STATE.courses.find((x) => x.id === courseId) || {}).name || '';
+  const m = $('#main');
+  m.innerHTML = '';
+  const w = el('div', 'wrap');
+  w.innerHTML = `
+    <div class="row" style="margin-bottom:10px">
+      <button class="ghost small" onclick="history.back()">← 返回</button>
+      <button id="olSave" class="small">导出 Markdown</button>
+    </div>
+    <h1>${esc(cname)} · 考前必备清单</h1>
+    <p class="sub">${d.createdAt ? '生成于 ' + new Date(d.createdAt).toLocaleString('zh-CN') : ''}</p>
+    <div class="detail outline" id="olBody"></div>`;
+  m.appendChild(w);
+  $('#olBody').innerHTML = mdToHtml(d.content || '（还没有清单，回课程页点「一键复习清单」）');
+  $('#olSave').onclick = async () => {
+    try {
+      const r = await api('POST', '/api/outline-save', { courseId, name: cname });
+      toast('已保存：' + (r.path || ''));
+    } catch (e) { toast('保存失败：' + (e.message || e)); }
+  };
+}
+
+// 极简 Markdown 渲染（标题/列表/粗体/段落）
+function mdToHtml(md) {
+  const lines = String(md).split(/\r?\n/);
+  let out = '';
+  let inList = false;
+  const closeList = () => { if (inList) { out += '</ul>'; inList = false; } };
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (!line.trim()) { closeList(); continue; }
+    let s = esc(line)
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/`(.+?)`/g, '<code>$1</code>');
+    if (/^###\s+/.test(line)) { closeList(); out += `<h4>${s.replace(/^###\s+/, '')}</h4>`; }
+    else if (/^##\s+/.test(line)) { closeList(); out += `<h3>${s.replace(/^##\s+/, '')}</h3>`; }
+    else if (/^#\s+/.test(line)) { closeList(); out += `<h2>${s.replace(/^#\s+/, '')}</h2>`; }
+    else if (/^[-*]\s+/.test(line)) {
+      if (!inList) { out += '<ul>'; inList = true; }
+      out += `<li>${s.replace(/^[-*]\s+/, '')}</li>`;
+    } else { closeList(); out += `<p>${s}</p>`; }
+  }
+  closeList();
+  return out;
+}
+
 // ---------------- 导入 ----------------
-function openImport() {
+// 从学科里点进来时带上学名，输入框锁住，避免导错学科
+function openImport(courseName) {
   $('#importModal').classList.remove('hidden');
   $('#importLog').textContent = '';
+  const el2 = $('#importCourse');
+  const inp = $('#importPath');
+  if (courseName) {
+    el2.value = courseName;
+    el2.readOnly = true;
+    el2.style.opacity = '.65';
+    $('#importTitle').textContent = `导入课件 · ${courseName}`;
+  } else {
+    el2.readOnly = false;
+    el2.style.opacity = '1';
+    $('#importTitle').textContent = '导入课件';
+  }
+  inp.value = '';
+  inp.focus();
 }
 async function doImport() {
   const file = $('#importPath').value.trim();

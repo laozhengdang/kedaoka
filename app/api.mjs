@@ -9,6 +9,17 @@ import { db, getProfile, setProfile, today, nowIso, uid } from './db.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 
+// ---------- 出处：章节名 ----------
+// 优先级：页面里识别出的章节 > 文件名里的「第X章」 > 文件名本身
+function chapterOf(fileName, pageChapter) {
+  if (pageChapter) return pageChapter;
+  if (!fileName) return '';
+  const m = fileName.match(/第[一二三四五六七八九十0-9]+[章节]/);
+  if (m) return m[0];
+  const base = fileName.replace(/\.[^.]+$/, '').replace(/^[0-9０-９]+[-\s._、]*/, '').trim();
+  return base.slice(0, 24);
+}
+
 // ---------- 排程（简化版 SM-2，见文档 D19 / D13） ----------
 export function schedule(cardId, rating, auto = 0) {
   const row = db.prepare('SELECT * FROM card_state WHERE card_id=?').get(cardId)
@@ -129,15 +140,23 @@ const handlers = {
     const q = (p.query?.q || '').trim();
     const filter = p.query?.filter || 'all';
     let sql = `SELECT c.id,c.front,c.back,c.importance,c.source_page,c.status,c.image_path,
-                      COALESCE(s.state,'new') st
-               FROM card c LEFT JOIN card_state s ON s.card_id=c.id
+                      COALESCE(s.state,'new') st,
+                      pg.chapter AS chapter, sf.path AS file_path
+               FROM card c
+               LEFT JOIN card_state s ON s.card_id=c.id
+               LEFT JOIN page pg ON pg.page_no=c.source_page
+                 AND pg.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
+               LEFT JOIN source_file sf ON sf.id=pg.file_id
                WHERE c.course_id=? AND c.status='active'`;
     const args = [p.id];
     if (q) { sql += ' AND (c.front LIKE ? OR c.back LIKE ?)'; args.push(`%${q}%`, `%${q}%`); }
     if (filter === 'weak') sql += " AND COALESCE(s.state,'new') IN ('learning','relearning')";
     if (filter === 'star4') sql += ' AND c.importance>=4';
     sql += ' ORDER BY c.source_page, c.importance DESC';
-    const rows = db.prepare(sql).all(...args);
+    const rows = db.prepare(sql).all(...args).map((r) => {
+      const fileName = r.file_path ? String(r.file_path).split(/[\\/]/).pop() : '';
+      return { ...r, fileName, chapter: chapterOf(fileName, r.chapter) };
+    });
     const groups = {};
     for (const r of rows) (groups[r.source_page] ||= []).push(r);
     return { total: rows.length, groups, cards: rows };
@@ -147,6 +166,16 @@ const handlers = {
     const c = db.prepare(`SELECT c.*, COALESCE(s.state,'new') st, s.due_at, s.streak_forgot, s.interval_days
                           FROM card c LEFT JOIN card_state s ON s.card_id=c.id WHERE c.id=?`).get(p.id);
     if (!c) throw new Error('卡片不存在');
+    const src = db.prepare(`
+      SELECT sf.path AS file_path, pg.chapter AS chapter
+      FROM page pg JOIN source_file sf ON sf.id=pg.file_id
+      WHERE pg.page_no=? AND sf.course_id=? LIMIT 1`).get(c.source_page, c.course_id);
+    const fileName = src && src.file_path ? String(src.file_path).split(/[\\/]/).pop() : '';
+    const source = {
+      page: c.source_page,
+      chapter: chapterOf(fileName, src && src.chapter),
+      fileName,
+    };
     const rels = db.prepare(`
       SELECT r.kind, r.from_concept, r.to_concept,
              cf.front AS from_front, ct.front AS to_front, cf.id AS from_card, ct.id AS to_card
@@ -159,7 +188,7 @@ const handlers = {
     const logs = db.prepare('SELECT ts,rating,auto FROM review_log WHERE card_id=? ORDER BY ts DESC LIMIT 5').all(p.id);
     const samePage = db.prepare('SELECT id,front,importance FROM card WHERE course_id=? AND source_page=? AND id<>? LIMIT 8')
       .all(c.course_id, c.source_page, p.id);
-    return { card: c, relations: rels, logs, samePage };
+    return { card: c, relations: rels, logs, samePage, source };
   },
 
   'POST /api/card/:id': (p, b) => {
@@ -194,6 +223,24 @@ const handlers = {
 
   'GET /api/courses': () => db.prepare('SELECT * FROM course ORDER BY created_at').all(),
 
+  // 新建学科（先建空课程，再往里导课件）
+  'POST /api/course': (_p, b) => {
+    const name = String(b?.name || '').trim();
+    if (!name) throw new Error('学科名不能为空');
+    const exists = db.prepare('SELECT id FROM course WHERE name=?').get(name);
+    if (exists) throw new Error('已经有同名学科了');
+    const profName = String(b?.profession || '兽医学').trim() || '兽医学';
+    let prof = db.prepare('SELECT id FROM profession WHERE name=?').get(profName);
+    if (!prof) {
+      prof = { id: uid('prof_') };
+      db.prepare('INSERT INTO profession(id,name) VALUES(?,?)').run(prof.id, profName);
+    }
+    const id = uid('course_');
+    db.prepare('INSERT INTO course(id,profession_id,name,mode,state,created_at) VALUES(?,?,?,?,?,?)')
+      .run(id, prof.id, name, b?.mode === 'calc' ? 'calc' : 'concept', 'active', nowIso());
+    return { ok: true, id, name };
+  },
+
   // ---- AI 配置与精修 ----
   'GET /api/ai/config': async () => {
     const { getAiConfig, maskKey } = await import('./ai.mjs');
@@ -217,6 +264,37 @@ const handlers = {
   'GET /api/refine-job/:id': async (p) => {
     const { getRefineJob } = await import('./ai.mjs');
     return getRefineJob(p.id);
+  },
+
+  // 一键复习清单
+  'POST /api/outline/:id': async (p) => {
+    const { startOutline } = await import('./ai.mjs');
+    return { job: startOutline(p.id) };
+  },
+  'GET /api/outline-job/:id': async (p) => {
+    const { getOutlineJob } = await import('./ai.mjs');
+    return getOutlineJob(p.id);
+  },
+  'GET /api/outline/:id': async (p) => {
+    const { getSavedOutline } = await import('./ai.mjs');
+    return getSavedOutline(p.id);
+  },
+
+  // 把清单导出成 Markdown 文件（存在 data/outlines/ 下）
+  'POST /api/outline-save': async (_p, b) => {
+    const { getSavedOutline } = await import('./ai.mjs');
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const o = getSavedOutline(b?.courseId);
+    if (!o.content) throw new Error('还没有清单可以导出');
+    const dataDir = process.env.MIAOMIAO_DATA || join(process.cwd(), 'data');
+    const dir = join(dataDir, 'outlines');
+    mkdirSync(dir, { recursive: true });
+    const safe = String(b?.name || '复习清单').replace(/[\\/:*?"<>|]/g, '_');
+    const stamp = new Date().toISOString().slice(0, 10);
+    const file = join(dir, `${safe}-考前清单-${stamp}.md`);
+    writeFileSync(file, o.content, 'utf8');
+    return { ok: true, path: file };
   },
 
   // 关系图：章 → 页 → 术语（章节名从"第一节/第二章"这类行识别，真实结构，不猜）
