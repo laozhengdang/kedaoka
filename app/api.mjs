@@ -188,6 +188,43 @@ const handlers = {
   },
 
   // ---- 待修队列：被标记「释义有误 / 图配错」的卡 ----
+  // ---- 别名合并：把一张卡并到另一张（同一个概念的不同叫法） ----
+  'POST /api/card/:id/merge': (p, b) => {
+    const intoId = String(b?.intoId || '');
+    if (!intoId) throw new Error('要指定并到哪张卡');
+    if (intoId === p.id) throw new Error('不能并到自己');
+    const src = db.prepare('SELECT * FROM card WHERE id=?').get(p.id);
+    const dst = db.prepare('SELECT * FROM card WHERE id=?').get(intoId);
+    if (!src || !dst) throw new Error('卡片不存在');
+    if (src.course_id !== dst.course_id) throw new Error('只能在同一门课里合并');
+
+    // 原名记成别名，将来搜旧名还能找到
+    const has = db.prepare('SELECT 1 FROM term WHERE concept_id=? AND text=?')
+      .get(dst.concept_id, src.front);
+    if (!has) {
+      db.prepare('INSERT INTO term(concept_id,text,kind,origin) VALUES(?,?,?,?)')
+        .run(dst.concept_id, src.front, 'alt', 'human');
+    }
+    // 关系一起搬过去
+    const rels = db.prepare('SELECT id, from_concept, to_concept FROM relation WHERE from_concept=? OR to_concept=?')
+      .all(src.concept_id, src.concept_id);
+    for (const r of rels) {
+      const from = r.from_concept === src.concept_id ? dst.concept_id : r.from_concept;
+      const to = r.to_concept === src.concept_id ? dst.concept_id : r.to_concept;
+      if (from === to) { db.prepare('DELETE FROM relation WHERE id=?').run(r.id); continue; }
+      const dup = db.prepare('SELECT 1 FROM relation WHERE from_concept=? AND to_concept=? AND kind=(SELECT kind FROM relation WHERE id=?)')
+        .get(from, to, r.id);
+      if (dup) { db.prepare('DELETE FROM relation WHERE id=?').run(r.id); continue; }
+      db.prepare('UPDATE relation SET from_concept=?, to_concept=? WHERE id=?').run(from, to, r.id);
+    }
+    // 重要度取高的，出处保留原卡页码
+    const imp = Math.max(Number(src.importance) || 3, Number(dst.importance) || 3);
+    db.prepare("UPDATE card SET importance=? WHERE id=?").run(imp, dst.id);
+    db.prepare("UPDATE card SET status='merged' WHERE id=?").run(src.id);
+    db.prepare('DELETE FROM daily_queue WHERE card_id=?').run(src.id);
+    return { ok: true, into: dst.front, alias: src.front };
+  },
+
   'GET /api/broken/:id': (p) => {
     const rows = db.prepare(`
       SELECT id, front, back, source_page, image_path, origin FROM card

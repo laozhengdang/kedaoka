@@ -261,3 +261,72 @@ textarea { min-height: 120px; font-family: var(--serif); }
 .ex-term { font-family: var(--serif); font-size: 40px; letter-spacing: 1px; }
 .ex-ans { margin-top: 18px; font-size: 16px; line-height: 1.9; color: #333; max-width: 620px; margin-left: auto; margin-right: auto; }
 .cardrow .pg { margin-left: 8px; }
+
+/* ---------- 计时器 ---------- */
+.rev-clocks { display: flex; gap: 14px; align-items: center; }
+.timer.over { color: #c0392b; font-weight: 600; }
+.timer.session { opacity: .55; }
+
+/* ---------- 主题 ---------- */
+/* 米黄纸（默认更像纸） */
+html[data-theme="warm"] {
+  --bg: #f6f1e4;
+  --panel: #fffdf6;
+  --ink: #241f19;
+  --muted: #7b7266;
+  --line: #e3dac6;
+  --accent-soft: #efe9d8;
+}
+/* 夜间 */
+html[data-theme="dark"] {
+  --bg: #16181c;
+  --panel: #1e2126;
+  --ink: #e7e7e3;
+  --muted: #9a9a92;
+  --line: #2c3037;
+  --accent: #7fa6ff;
+  --accent-soft: #232a38;
+  --warn: #e0a44a;
+  --red: #e06a6a;
+}
+html[data-theme="dark"] body { background: var(--bg); color: var(--ink); }
+html[data-theme="dark"] .card, 
+html[data-theme="dark"] .detail,
+html[data-theme="dark"] .today-card,
+html[data-theme="dark"] .modal-box,
+html[data-theme="dark"] .sidebar { background: var(--panel); }
+html[data-theme="dark"] input { background: #23262c; color: var(--ink); border-color: var(--line); }
+html[data-theme="dark"] .choice.r1 { background: #1d3a2a; border-color: #2f6a4a; color: #a9e3c0; }
+html[data-theme="dark"] .choice.r2 { background: #1e2c46; border-color: #35507d; color: #a9c6f5; }
+html[data-theme="dark"] .choice.r3 { background: #3d3418; border-color: #7a6526; color: #f0d98a; }
+html[data-theme="dark"] .choice.r4 { background: #3c1f1f; border-color: #7d3a3a; color: #f0a9a9; }
+html[data-theme="dark"] .choice.r1:hover { background: #244a35; }
+html[data-theme="dark"] .choice.r2:hover { background: #263a5a; }
+html[data-theme="dark"] .choice.r3:hover { background: #4b4020; }
+html[data-theme="dark"] .choice.r4:hover { background: #4b2626; }
+html[data-theme="dark"] .outline code { background: #262a31; }
+
+/* 首页名言 */
+.quote {
+  margin: 26px 0 8px; padding-left: 12px;
+  border-left: 3px solid var(--line);
+  color: var(--muted); font-family: var(--serif); font-size: 15px; line-height: 1.9;
+}
+.quote .by { display: block; margin-top: 4px; font-size: 12px; }
+
+/* 主题选择 */
+.theme-row { display: flex; gap: 10px; margin-top: 8px; }
+.theme-chip {
+  width: 74px; height: 46px; border-radius: 8px; cursor: pointer;
+  border: 2px solid var(--line); display: flex; align-items: flex-end;
+  justify-content: center; padding-bottom: 4px; font-size: 12px;
+}
+.theme-chip[data-on="1"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.theme-chip.paper { background: #fbfbf9; color: #333; }
+.theme-chip.warm { background: #f6f1e4; color: #4a4030; }
+.theme-chip.dark { background: #16181c; color: #ddd; }
+html[data-theme="dark"] .ai-ok { background: #1b2f22; border-color: #2f5c3e; }
+html[data-theme="dark"] .ai-ok-title { color: #9fe0b6; }
+html[data-theme="dark"] .ai-status.good { background: #1b2f22; border-color: #2f5c3e; color: #9fe0b6; }
+html[data-theme="dark"] .ai-status.bad { background: #331c1c; border-color: #6b3232; color: #f0a9a9; }
+html[data-theme="dark"] .outline b { color: #fff; }

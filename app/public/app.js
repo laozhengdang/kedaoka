@@ -73,9 +73,17 @@ async function boot() {
   if (window.nativeApi && window.nativeApi.dataDir) {
     STATE.dataDir = await window.nativeApi.dataDir();
   }
+  applyTheme(STATE.profile.theme || 'paper');
   renderSidebar();
   bindChrome();
   route();
+}
+
+// 换肤：只改 <html data-theme>，颜色全交给 CSS 变量
+function applyTheme(theme) {
+  const t = ['paper', 'warm', 'dark'].includes(theme) ? theme : 'paper';
+  document.documentElement.dataset.theme = t;
+  STATE.profile.theme = t;
 }
 
 // 图片地址：桌面版拼 file://，网页版走 /img/
@@ -219,9 +227,10 @@ async function viewHome() {
   const totalLeft = STATE.courses.reduce((a, c) => a + Math.max(0, c.today.total - c.today.done), 0);
   w.innerHTML = `
     <h1>今天</h1>
-    <p class="sub">${STATE.courses.length} 门课程 · 待刷 ${totalLeft} 张</p>`;
+    <p class="sub">${STATE.courses.length} 门课程 · 待刷 ${totalLeft} 张</p>
+    ${ST (STATE.profile.quote || '')}`;
   if (!STATE.courses.length) {
-    w.appendChild(el('div', 'empty', '还没有课程。点左下「导入课件」开始。'));
+    w.appendChild(el('div', 'empty', '还没有课程。点左下「新建学科」开始。'));
   } else {
     for (const c of STATE.courses) {
       const card = el('div', 'today-card');
@@ -358,7 +367,10 @@ function openReview() {
   box.innerHTML = `
     <div class="rev-top">
       <span id="revProg"></span>
-      <span class="timer" id="revTimer">0:00</span>
+      <span class="rev-clocks">
+        <span class="timer" id="revTimer" title="这张卡用时">0:00</span>
+        <span class="timer session" id="revSession" title="本轮累计（不限时）">本轮 0:00</span>
+      </span>
       <span>
         <button class="small ghost" id="btnBrokenText">释义有误</button>
         <button class="small ghost" id="btnBrokenImg">图配错</button>
@@ -393,18 +405,26 @@ function endReview() {
 
 function tick() {
   if (!REVIEW) return;
-  const sec = Math.floor((Date.now() - REVIEW.t0) / 1000);
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const sessSec = Math.floor((Date.now() - REVIEW.t0) / 1000);
+  const sess = $('#revSession');
+  if (sess) sess.textContent = `本轮 ${fmt(sessSec)}`;
+
   const t = $('#revTimer');
   if (!t) return;
-  t.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  const cardSec = Math.floor((Date.now() - REVIEW.cardT0) / 1000);
+  t.textContent = fmt(cardSec);
+
+  // 卡片计时器：超时只提醒，不替用户作答
   if (REVIEW.phase === 'ask' && !REVIEW.autoDue) {
-    const cardSec = Math.floor((Date.now() - REVIEW.cardT0) / 1000);
-    if (cardSec >= 90) {
-      REVIEW.autoDue = true;
+    const limit = Number(STATE.profile?.card_timer_sec || 90);
+    const on = STATE.profile?.card_timer !== false;
+    if (on && cardSec >= limit) {
+      REVIEW.autoDue = true;         // 只用来避免重复触发
       t.classList.add('over');
       t.title = '这张已超时';
-      // 默认策略：自动翻面 + 记③模糊（auto=1），见文档 17.9
-      chooseRating(3, true);
+      const hint = $('#revHint');
+      if (hint) hint.textContent = '这张超时了，凭直觉选一个就行';
     }
   }
 }
@@ -853,7 +873,12 @@ async function viewCard(id) {
       <div class="src">出处：${d.source && d.source.chapter ? esc(d.source.chapter) + ' · ' : ''}第 ${c.source_page} 页${d.source && d.source.fileName ? ' · ' + esc(d.source.fileName) : ''} · origin=${c.origin}</div>
       <div class="row" style="margin-top:18px">
         <button id="btnEdit" class="small">修改</button>
-        <button id="btnStar" class="small">⭐ 加入今天的队列</button>
+        <button id="btnMerge" class="small">并入其它卡（别名合并）</button>
+      </div>
+      <div id="mergeBox" class="hidden" style="margin-top:16px">
+        <p class="hint">输入另一张卡的名字，把它并到那张上去。原标题会存成别名，关系也会一起搬过去。</p>
+        <input id="mergeQ" placeholder="输入要并入的术语名，例如 抗原表位">
+        <div id="mergeList" class="detail" style="margin-top:8px"></div>
       </div>
       <div id="editor" class="hidden" style="margin-top:18px">
         <input id="eFront" value="${esc(c.front)}">
@@ -878,7 +903,36 @@ async function viewCard(id) {
     toast('已保存（标为人工修改）');
     viewCard(id);
   };
-  $('#btnStar').onclick = () => toast('已加入队列（下一版实现精确插入）');
+  $('#btnMerge').onclick = () => {
+    const box = $('#mergeBox');
+    box.classList.toggle('hidden');
+    if (!box.classList.contains('hidden')) $('#mergeQ').focus();
+  };
+  const doSearch = debounce(async () => {
+    const q = $('#mergeQ').value.trim();
+    const list = $('#mergeList');
+    if (!q) { list.innerHTML = ''; return; }
+    const r = await api('GET', `/api/browse/${c.course_id}?q=${encodeURIComponent(q)}`);
+    const items = r.cards.filter((x) => x.id !== c.id).slice(0, 8);
+    list.innerHTML = '';
+    if (!items.length) { list.innerHTML = '<p class="sub">没找到同名的卡</p>'; return; }
+    for (const it of items) {
+      const row = el('div', 'cardrow');
+      row.innerHTML = `<span class="t">${esc(it.front)}</span>
+        <span class="pg">第 ${it.source_page} 页</span>`;
+      row.onclick = async () => {
+        if (!confirm(`把「${c.front}」并到「${it.front}」？`)) return;
+        try {
+          const res = await api('POST', `/api/card/${c.id}/merge`, { intoId: it.id });
+          toast(`已并入「${res.into}」，"${res.alias}" 存为别名`);
+          location.hash = `#/card/${it.id}`;
+          viewCard(it.id);
+        } catch (e) { toast('合并失败：' + (e.message || e)); }
+      };
+      list.appendChild(row);
+    }
+  }, 260);
+  $('#mergeQ').oninput = doSearch;
 }
 
 // ---------------- 设置 ----------------
@@ -893,6 +947,29 @@ async function viewSettings() {
     <h1>设置</h1>
     <h2>AI 接口</h2>
     <div class="detail" id="aiPanel"></div>
+    <h2>外观</h2>
+    <div class="detail">
+      <div class="sub">配色</div>
+      <div class="theme-row">
+        <div class="theme-chip paper" data-theme-pick="paper">纸白</div>
+        <div class="theme-chip warm" data-theme-pick="warm">米黄</div>
+        <div class="theme-chip dark" data-theme-pick="dark">夜间</div>
+      </div>
+      <div class="row" style="align-items:center;gap:12px;margin-top:14px">
+        <label style="width:140px">首页一句话</label>
+        <input id="pQuote" value="${esc(p.quote || '')}" placeholder="留空则不显示（可用「正文 —— 出处」）">
+      </div>
+      <p class="hint">写在首页顶上，给自己打气用。</p>
+    </div>
+    <h2>计时器</h2>
+    <div class="detail">
+      <label><input type="checkbox" id="pTimer" ${p.card_timer !== false ? 'checked' : ''}> 每张卡计时（超时只提醒，不替你作答）</label>
+      <div class="row" style="align-items:center;gap:12px;margin-top:10px">
+        <label style="width:140px">超时阈值（秒）</label>
+        <input id="pTimerSec" type="number" value="${Number(p.card_timer_sec) || 90}" style="width:120px">
+      </div>
+      <p class="hint">复习界面右上还有「本轮累计」计时，那个不限时，只是让你知道坐了多久。</p>
+    </div>
     <h2>学习节奏</h2>
     <div class="detail">
       <div class="row" style="align-items:center;gap:12px">
@@ -921,11 +998,30 @@ async function viewSettings() {
       show_progress: $('#pProg').checked,
       show_streak: $('#pStreak').checked,
       splash: $('#pSplash').checked,
+      theme: STATE.profile.theme || 'paper',
+      quote: $('#pQuote').value.trim(),
+      card_timer: $('#pTimer').checked,
+      card_timer_sec: Number($('#pTimerSec').value) || 90,
     });
     toast('已保存');
     const b = await api('GET', '/api/bootstrap');
     STATE.profile = b.profile;
+    applyTheme(STATE.profile.theme || 'paper');
   };
+
+  // 主题：点了立刻生效并保存
+  w.querySelectorAll('[data-theme-pick]').forEach((chip) => {
+    const on = chip.dataset.themePick === (STATE.profile.theme || 'paper');
+    chip.dataset.on = on ? '1' : '0';
+    chip.onclick = async () => {
+      const t = chip.dataset.themePick;
+      applyTheme(t);
+      w.querySelectorAll('[data-theme-pick]').forEach((x) => { x.dataset.on = x === chip ? '1' : '0'; });
+      await api('POST', '/api/settings', { theme: t });
+      const b = await api('GET', '/api/bootstrap');
+      STATE.profile = b.profile;
+    };
+  });
 
   // ---- AI 配置 ----
   renderAiPanel(ai);
@@ -1256,6 +1352,14 @@ async function doImport() {
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 首页那句话：允许写成「正文 —— 出处」，出处用小字
+function ST(q) {
+  const s = String(q || '').trim();
+  if (!s) return '';
+  const [body, by] = s.split(/\s*——\s*/);
+  return `<div class="quote">${esc(body)}${by ? `<span class="by">—— ${esc(by)}</span>` : ''}</div>`;
 }
 
 // 星级：实心用金色，空星用很浅的金灰（不再是灰白一片）

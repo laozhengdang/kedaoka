@@ -194,8 +194,11 @@ export function setProfile(key, value) {
     .run(key, JSON.stringify(value));
 }
 
-export function today() {
-  const d = new Date();
+// 学习日的分界不是午夜，而是凌晨 4 点（学生经常刷到半夜）
+export const DAY_START_HOUR = 4;
+
+export function today(now = new Date()) {
+  const d = new Date(now.getTime() - DAY_START_HOUR * 3600 * 1000);
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
