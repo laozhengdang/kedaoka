@@ -734,9 +734,10 @@ function renderCard() {
   if (!inner) return;
 
   if (r.phase === 'ask') {
+    const where = c.chapter ? `${esc(c.chapter)} · 第 ${c.source_page} 页` : `第 ${c.source_page} 页`;
     inner.innerHTML = `
       <div class="term">${esc(c.front)}</div>
-      <div class="meta">${stars(c.importance)} · 第 ${c.source_page} 页</div>
+      <div class="meta">${stars(c.importance)} · ${where}</div>
       <div class="choices">
         <button class="choice r1" data-r="1">记得<small>以后不用再考</small><span class="kbd">1</span></button>
         <button class="choice r2" data-r="2">记得<small>不用看概念</small><span class="kbd">2</span></button>
@@ -760,7 +761,7 @@ function renderCard() {
   } else {
     inner.innerHTML = `
       <div class="term">${esc(c.front)}</div>
-      <div class="meta">第 ${c.source_page} 页 · ${stars(c.importance)}</div>
+      <div class="meta">${c.chapter ? esc(c.chapter) + ' · ' : ''}第 ${c.source_page} 页 · ${stars(c.importance)}</div>
       <div class="answer"><div class="label">课件原文</div>${esc(c.back || '（这一页没有抽到上下文）')}</div>
       <div id="revDia"></div>
       ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" alt="配图" loading="lazy"></div>` : ''}

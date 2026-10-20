@@ -249,10 +249,26 @@ export function queueState(courseId) {
   ensureQueue(courseId);
   const round = latestRound(courseId, date);
   const rows = db.prepare(`
-    SELECT q.card_id, q.done, q.position, c.front, c.back, c.importance, c.source_page, c.image_path
-    FROM daily_queue q JOIN card c ON c.id=q.card_id
+    SELECT q.card_id, q.done, q.position, c.front, c.back, c.importance, c.source_page, c.image_path,
+           pg.chapter AS chapter, sf.path AS file_path
+    FROM daily_queue q
+    JOIN card c ON c.id=q.card_id
+    LEFT JOIN page pg ON pg.id = (
+      SELECT p2.id FROM page p2 WHERE p2.file_id = COALESCE(c.file_id, p2.file_id)
+        AND p2.page_no = c.source_page
+        AND p2.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
+      ORDER BY p2.id LIMIT 1)
+    LEFT JOIN source_file sf ON sf.id = pg.file_id
     WHERE q.course_id=? AND q.date=? AND q.round=?
     ORDER BY q.done, q.position`).all(courseId, date, round);
+
+  // 章节兜底：页面里没有就从文件名找
+  for (const r of rows) {
+    if (r.chapter) continue;
+    const fn = r.file_path ? String(r.file_path).split(/[\\/]/).pop() : '';
+    const m = fn.match(/第[一二三四五六七八九十0-9]+[章节]/);
+    r.chapter = m ? m[0] : fn.replace(/\.[^.]+$/, '').replace(/^[0-9０-９]+[-\s._、]*/, '').trim();
+  }
 
   // 今天没排上的剩余新卡，用来提示"还有 N 张没刷"
   const left = db.prepare(`
