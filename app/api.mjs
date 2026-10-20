@@ -474,7 +474,8 @@ const handlers = {
     const filter = p.query?.filter || 'all';
     let sql = `SELECT c.id,c.front,c.back,c.importance,c.source_page,c.status,c.image_path,
                       COALESCE(s.state,'new') st,
-                      pg.chapter AS chapter, sf.path AS file_path
+                      pg.chapter AS chapter, sf.path AS file_path,
+                      (SELECT COUNT(*) FROM card_diagram cd WHERE cd.card_id=c.id) AS dia_count
                FROM card c
                LEFT JOIN card_state s ON s.card_id=c.id
                LEFT JOIN page pg ON pg.id = (
@@ -494,6 +495,11 @@ const handlers = {
     if (q) { sql += ' AND (c.front LIKE ? OR c.back LIKE ?)'; args.push(`%${q}%`, `%${q}%`); }
     if (filter === 'weak') sql += " AND COALESCE(s.state,'new') IN ('learning','relearning')";
     if (filter === 'star4') sql += ' AND c.importance>=4';
+    // 只看有图的：配了课件插图，或者挂了机制图
+    if (filter === 'pic') {
+      sql += ` AND (c.image_path IS NOT NULL AND c.image_path <> ''
+                 OR EXISTS(SELECT 1 FROM card_diagram cd WHERE cd.card_id=c.id))`;
+    }
     sql += ' ORDER BY c.source_page, c.importance DESC';
     const rows = db.prepare(sql).all(...args).map((r) => {
       const fileName = r.file_path ? String(r.file_path).split(/[\\/]/).pop() : '';
@@ -501,7 +507,14 @@ const handlers = {
     });
     const groups = {};
     for (const r of rows) (groups[r.source_page] ||= []).push(r);
-    return { total: rows.length, groups, cards: rows };
+    // "只看有图"按钮上显示的总数（不受当前筛选影响）
+    const picCount = db.prepare(`
+      SELECT COUNT(*) n FROM card c
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+        AND ((c.image_path IS NOT NULL AND c.image_path <> '')
+             OR EXISTS(SELECT 1 FROM card_diagram cd WHERE cd.card_id=c.id))`)
+      .get(p.id).n;
+    return { total: rows.length, groups, cards: rows, picCount };
   },
 
   'GET /api/card/:id': (p) => {

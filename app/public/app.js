@@ -1252,6 +1252,7 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '')
       <button class="small ${filter === 'all' ? 'primary' : ''}" data-f="all">全部 ${d.total}</button>
       <button class="small ${filter === 'weak' ? 'primary' : ''}" data-f="weak">只看薄弱的</button>
       <button class="small ${filter === 'star4' ? 'primary' : ''}" data-f="star4">只看 4★ 以上</button>
+      <button class="small ${filter === 'pic' ? 'primary' : ''}" data-f="pic">只看有图的 ${d.picCount ?? ''}</button>
     </div>
     <div class="row" style="margin-bottom:10px">
       <button class="small ${!kind ? 'primary' : ''}" data-k="">理论+实验</button>
@@ -1279,8 +1280,10 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '')
     for (const c of groups[pg]) {
       const row = el('div', 'cardrow');
       const where = c.chapter ? `${esc(c.chapter)} · 第 ${c.source_page} 页` : `第 ${c.source_page} 页`;
+      const mark = c.dia_count > 0 ? '<span class="badge-dia" title="有机制图">图</span>' : '';
       row.innerHTML = `<span class="t">${esc(c.front)}</span>
         <span class="star">${stars(c.importance)}</span>
+        ${mark}
         <span class="pg" title="${esc(c.fileName || '')}">${where}</span>`;
       row.onclick = () => { location.hash = `#/card/${c.id}`; };
       list.appendChild(row);

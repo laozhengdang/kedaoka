@@ -445,3 +445,9 @@ html[data-theme="dark"] .dia-node { color: #e7e7e3; }
 }
 .card-dia { max-width: 100%; }
 .rev-dia .sub { margin-bottom: 6px; }
+
+/* 仓库里"有机制图"的小标记 */
+.badge-dia {
+  font-size: 10px; line-height: 1; padding: 2px 4px; border-radius: 4px;
+  background: var(--accent-soft); color: var(--accent); margin-left: 6px;
+}
