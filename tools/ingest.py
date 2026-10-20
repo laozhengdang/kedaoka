@@ -562,6 +562,68 @@ def main():
         return
 
 
+    # 2.4) 复习资料：按条目切（编号 / ①②③ / 冒号结尾的先导句 / 很短的标题行）
+    if args.doc_type == "notes":
+        notes_cards = 0
+        item_start = re.compile(r"^(?:[0-9]{1,2}[.、)）]|[（(][0-9０-９]{1,2}[)）]|[①-⑳]|[一二三四五六七八九十]+、)")
+        cur = None
+
+        def flush_note():
+            nonlocal notes_cards, cur
+            if not cur:
+                return
+            body = "\n".join(cur["lines"]).strip()
+            name = cur["name"].strip()
+            if len(name) < 2 or len(body) < 6:
+                cur = None
+                return
+            exists = conn.execute(
+                "SELECT c.id FROM term t JOIN concept c ON c.id=t.concept_id "
+                "WHERE t.text=? AND c.course_id=? AND t.kind='preferred'", (name[:40], course_id)
+            ).fetchone()
+            if not exists:
+                concept_id = uid("cp_")
+                conn.execute("INSERT INTO concept(id,course_id,type,created_at) VALUES(?,?,?,?)",
+                             (concept_id, course_id, "unknown", now()))
+                conn.execute("INSERT INTO term(concept_id,text,kind,origin) VALUES(?,?,?,?)",
+                             (concept_id, name[:40], "preferred", "notes"))
+                card_id = uid("card_")
+                conn.execute(
+                    "INSERT INTO card(id,course_id,concept_id,front,back,image_path,source_page,source_text,"
+                    "importance,origin,status,is_title,file_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (card_id, course_id, concept_id, name[:60], body[:600], None, cur["page"], body[:600],
+                     3, "notes", "active", 0, fid, now()),
+                )
+                conn.execute("INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?)",
+                             (card_id, "new", now()))
+                notes_cards += 1
+            cur = None
+
+        for pno in sorted(page_cache):
+            for ln in page_cache[pno]:
+                # 中文资料里空格没有意义，先全压掉（PDF 抽字常把「2.」抽成「2 .」）
+                raw = re.sub(r"\s+", "", (ln.get("text") or "")).strip()
+                if not raw:
+                    continue
+                ends_sentence = raw.endswith(("。", "，", "；", "、", "！", "？"))
+                is_new = bool(item_start.match(raw)) or raw.endswith(("：", ":")) \
+                    or (len(raw) <= 14 and not ends_sentence)
+                if is_new:
+                    flush_note()
+                    name = re.sub(r"^(?:[0-9]{1,2}[.、)）]|[（(][0-9０-９]{1,2}[)）]|[①-⑳]|[一二三四五六七八九十]+、)\s*",
+                                  "", raw)
+                    cur = {"name": name.rstrip("：:"), "page": pno, "lines": [raw]}
+                elif cur:
+                    cur["lines"].append(raw)
+        flush_note()
+        conn.commit()
+        total = conn.execute("SELECT COUNT(*) FROM card WHERE course_id=?", (course_id,)).fetchone()[0]
+        print(json.dumps({
+            "ok": True, "kind": "notes", "created": notes_cards,
+            "file_id": fid, "course_id": course_id, "total_cards": total,
+        }, ensure_ascii=False))
+        return
+
     for pno, t in page_main_term.items():
         if not t or t in found:
             continue

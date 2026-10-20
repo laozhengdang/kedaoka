@@ -1866,8 +1866,18 @@ function paintDiagram(holder, d, opts = {}) {
     const ax = a.x + a.w / 2, ay = a.y + a.h;
     const bx = b.x + b.w / 2, by = b.y;
     let p;
-    if (Math.abs(ax - bx) < 8) p = `M ${ax} ${ay} L ${bx} ${by}`;
-    else {
+    if (Math.abs(ax - bx) < 8) {
+      p = `M ${ax} ${ay} L ${bx} ${by}`;
+    } else if (by - ay > 6) {
+      const my = (ay + by) / 2;
+      p = `M ${ax} ${ay} L ${ax} ${my} L ${bx} ${my} L ${bx} ${by}`;
+    } else if (b.y + b.h > a.y && Math.abs((b.x + b.w / 2) - (a.x + a.w / 2)) > 20) {
+      // 大致同高：从右侧出、左侧进
+      const sx2 = a.x + a.w, sy2 = a.y + a.h / 2;
+      const tx2 = b.x, ty2 = b.y + b.h / 2;
+      const mx2 = (sx2 + tx2) / 2;
+      p = `M ${sx2} ${sy2} L ${mx2} ${sy2} L ${mx2} ${ty2} L ${tx2} ${ty2}`;
+    } else {
       const my = (ay + by) / 2;
       p = `M ${ax} ${ay} L ${ax} ${my} L ${bx} ${my} L ${bx} ${by}`;
     }
@@ -1876,11 +1886,47 @@ function paintDiagram(holder, d, opts = {}) {
   }
   const mid = `arrow-${(d.diagram && d.diagram.id) || 'x'}`;
 
+  // 按 draw.io 的形状来画：椭圆/菱形/六边形/圆柱/纯文字…
+  const shapeCss = (n) => {
+    const base = `border:1px solid ${n.stroke};background:${n.fill};`;
+    switch (n.shape) {
+      case 'ellipse':
+        return base + 'border-radius:50%;';
+      case 'rhombus':
+        return 'border:none;background:transparent;';
+      case 'hexagon':
+        return base + 'clip-path:polygon(22% 0,78% 0,100% 50%,78% 100%,22% 100%,0 50%);';
+      case 'triangle':
+        return base + 'clip-path:polygon(50% 0,100% 100%,0 100%);';
+      case 'parallelogram':
+        return base + 'transform:skewX(-12deg);';
+      case 'trapezoid':
+        return base + 'clip-path:polygon(18% 0,82% 0,100% 100%,0 100%);';
+      case 'cylinder':
+        return base + 'border-radius:50% / 14%;';
+      case 'document':
+        return base + 'border-radius:3px 3px 40% 3px / 3px 3px 18% 3px;';
+      case 'text':
+        return 'border:none;background:transparent;';
+      case 'rounded':
+        return base + 'border-radius:10px;';
+      default:
+        return base + 'border-radius:3px;';
+    }
+  };
+
   const nodesHtml = d.nodes.map((n) => {
-    const cls = 'dia-node' + (n.cardId ? ' linked' : '');
+    const cls = 'dia-node' + (n.cardId ? ' linked' : '') + (n.shape === 'rhombus' ? ' diamond' : '');
     const style = `left:${n.x - minX}px;top:${n.y - minY}px;width:${n.w}px;height:${n.h}px;` +
-      `background:${n.fill};border-color:${n.stroke};border-radius:${n.rounded ? 8 : 3}px;` +
+      `${shapeCss(n)}` +
       `font-size:${n.fontSize}px;${n.bold ? 'font-weight:600;' : ''}`;
+    if (n.shape === 'rhombus') {
+      // 菱形用旋转的内层画，文字单独一层不旋转
+      return `<div class="${cls}" style="${style}" data-card="${n.cardId || ''}">
+        <span class="dia-diamond" style="background:${n.fill};border-color:${n.stroke}"></span>
+        <span class="dia-label" ${n.shape === 'parallelogram' ? 'style="transform:skewX(12deg)"' : ''}>${esc(n.text)}</span>
+      </div>`;
+    }
     return `<div class="${cls}" style="${style}" data-card="${n.cardId || ''}">${esc(n.text)}</div>`;
   }).join('');
 
@@ -2352,15 +2398,24 @@ async function viewCard(id) {
       ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" data-card-id="${c.id}" alt="配图" loading="lazy"></div>` : ''}
       ${d.samePage.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">同一页的其他概念</div>
         ${d.samePage.map((x) => `<a data-go="${x.id}">${esc(x.front)}</a>`).join(' · ')}</div>` : ''}
-      ${d.relations.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">相关概念</div>
-        ${d.relations.map((r) => `<a data-go="${r.from_card === c.id ? r.to_card : r.from_card}">${esc(r.from_card === c.id ? r.to_front : r.from_front)}</a>`).join(' · ')}</div>` : ''}
+      ${d.relations.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">相关概念（点 × 可删除）</div>
+        ${d.relations.map((r) => `<span class="rel-item"><a data-go="${r.from_card === c.id ? r.to_card : r.from_card}">${esc(r.from_card === c.id ? r.to_front : r.from_front)}</a><span class="rel-x" data-rel="${r.rel_id || r.id}" title="删除这条关联">×</span></span>`).join(' ')}</div>` : ''}
       <div class="src">出处：${d.source && d.source.chapter ? esc(d.source.chapter) + ' · ' : ''}第 ${c.source_page} 页${d.source && d.source.fileName ? ' · ' + esc(d.source.fileName) : ''} · origin=${c.origin}</div>
       <div class="row" style="margin-top:18px">
-        <button id="btnEdit" class="small">修改</button>
+        <button id="btnEdit" class="small">修改文字</button>
+        <button id="btnSwapImg" class="small">${c.image_path ? '换配图' : '补一张配图'}</button>
+        ${c.image_path ? '<button id="btnDelImg" class="ghost small">去掉配图</button>' : ''}
+        <button id="btnRevert" class="ghost small" title="把标题和释义恢复成导入/AI 生成时的原样">恢复原版</button>
         <button id="btnMerge" class="small">并入其它卡（别名合并）</button>
+        <button id="btnAddRel" class="small">＋ 关联一个概念</button>
         <button id="btnToQueue" class="small">加入今天的队列</button>
         <button id="btnQuizOne" class="small">就这一张，考我</button>
         <button id="btnShowPage" class="ghost small">查看原文</button>
+      </div>
+      <div id="addRelBox" class="hidden" style="margin-top:14px">
+        <p class="hint">输入另一个概念的名字，建立「相关」关系。</p>
+        <input id="addRelQ" placeholder="输入术语名，例如 补体">
+        <div id="addRelList" class="detail" style="margin-top:8px"></div>
       </div>
       <div id="mergeBox" class="hidden" style="margin-top:16px">
         <p class="hint">输入另一张卡的名字，把它并到那张上去。原标题会存成别名，关系也会一起搬过去。</p>
@@ -2385,6 +2440,74 @@ async function viewCard(id) {
     const r = await api('POST', `/api/card/${c.id}/queue`, {});
     toast(r.already ? '这张已经在今天的队列里了' : '已加入今天的队列');
   };
+  // 换配图 / 去掉配图 / 恢复原版
+  const swap = $('#btnSwapImg');
+  if (swap) swap.onclick = async () => {
+    if (!window.nativeApi || !window.nativeApi.pickImage) return toast('网页版不支持选图片');
+    const picked = await window.nativeApi.pickImage();
+    if (!picked) return;
+    const path = Array.isArray(picked) ? picked[0] : picked;
+    try {
+      await api('POST', `/api/card/${c.id}/image`, { path });
+      toast('配图已替换');
+      viewCard(c.id);
+    } catch (e) { toast('换图失败：' + (e.message || e)); }
+  };
+  const delImg = $('#btnDelImg');
+  if (delImg) delImg.onclick = async () => {
+    if (!confirm('去掉这张卡的配图？')) return;
+    await api('POST', `/api/card/${c.id}/image-remove`, {});
+    toast('配图已去掉');
+    viewCard(c.id);
+  };
+  const revert = $('#btnRevert');
+  if (revert) revert.onclick = async () => {
+    if (!confirm('把标题和释义恢复成导入时的原样？你改过的内容会丢。')) return;
+    try {
+      await api('POST', `/api/card/${c.id}/revert`, {});
+      toast('已恢复原版');
+      viewCard(c.id);
+    } catch (e) { toast(e.message || '恢复失败'); }
+  };
+
+  // 删除一条关联
+  w.querySelectorAll('[data-rel]').forEach((x) => {
+    x.onclick = async (ev) => {
+      ev.stopPropagation();
+      await api('POST', '/api/relation/delete', { id: x.dataset.rel });
+      toast('关联已删除');
+      viewCard(c.id);
+    };
+  });
+
+  // 添加关联：输入名字搜卡片
+  const addRel = $('#btnAddRel');
+  if (addRel) addRel.onclick = () => {
+    const box = $('#addRelBox');
+    box.classList.toggle('hidden');
+    const q = $('#addRelQ');
+    q.focus();
+    q.oninput = debounce(async () => {
+      const kw = q.value.trim();
+      const list = $('#addRelList');
+      if (kw.length < 1) { list.innerHTML = ''; return; }
+      const r = await api('GET', `/api/search?q=${encodeURIComponent(kw)}`);
+      const rows = (r.results || []).filter((x) => x.id !== c.id).slice(0, 8);
+      list.innerHTML = rows.map((x) => `<div class="cardrow" data-pick="${x.id}">
+        <span class="t">${esc(x.front)}</span><span class="pg">${esc(x.courseName || '')}</span></div>`).join('')
+        || '<p class="sub">没找到</p>';
+      list.querySelectorAll('[data-pick]').forEach((row) => {
+        row.onclick = async () => {
+          try {
+            await api('POST', '/api/relation/add', { from: c.id, to: row.dataset.pick });
+            toast('已建立关联');
+            viewCard(c.id);
+          } catch (e) { toast(e.message || '添加失败'); }
+        };
+      });
+    }, 220);
+  };
+
   $('#btnQuizOne').onclick = () => quizSingleCard(c, w);
   $('#btnShowPage').onclick = () => showPageText(c.id);
 

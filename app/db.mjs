@@ -264,3 +264,12 @@ export function nowIso() {
 export function uid(prefix = '') {
   return prefix + crypto.randomUUID().slice(0, 8);
 }
+
+
+// 卡片原始值：用于「恢复 AI 原版」
+ensureColumn('card', 'orig_front', 'orig_front TEXT');
+ensureColumn('card', 'orig_back', 'orig_back TEXT');
+try {
+  db.exec("UPDATE card SET orig_front = front WHERE orig_front IS NULL");
+  db.exec("UPDATE card SET orig_back = back WHERE orig_back IS NULL");
+} catch { /* 表还没建好时忽略 */ }

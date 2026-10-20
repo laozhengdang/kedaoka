@@ -602,3 +602,18 @@ body.plain-buttons .btn-tint {
 /* 课程页功能按钮：一行放不下自动折行，文字不竖着断 */
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .actions .btn-tint { white-space: nowrap; padding: 7px 14px; border-radius: 10px; }
+
+/* 机制图：菱形与文字层 */
+.dia-node.diamond { border: none !important; background: transparent !important; display: flex; align-items: center; justify-content: center; }
+.dia-node .dia-diamond {
+  position: absolute; inset: 0; border: 1px solid var(--edge);
+  transform: rotate(45deg) scale(0.72); border-radius: 2px;
+}
+.dia-node .dia-label { position: relative; z-index: 1; text-align: center; padding: 0 4px; }
+
+/* 关联项与删除按钮 */
+.rel-item { display: inline-flex; align-items: center; gap: 2px; margin-right: 10px; }
+.rel-x {
+  cursor: pointer; color: var(--muted); font-size: 13px; padding: 0 3px; border-radius: 4px;
+}
+.rel-x:hover { color: #c0392b; background: rgba(192,57,43,.1); }

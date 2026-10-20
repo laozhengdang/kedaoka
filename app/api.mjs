@@ -3,7 +3,7 @@
 
 import { spawn } from 'node:child_process';
 import zlib from 'node:zlib';
-import { existsSync } from 'node:fs';
+import { existsSync, copyFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, getProfile, setProfile, today, nowIso, uid } from './db.mjs';
@@ -95,6 +95,22 @@ function parseDiagramNodes(xml) {
     if (!Number.isFinite(w)) w = Number(xmlAttr(head, 'w')) || 120;
     if (!Number.isFinite(h)) h = Number(xmlAttr(head, 'h')) || 40;
     const st = styleMap(xmlAttr(head, 'style'));
+    // 形状：draw.io 用 shape=xxx 或裸标签（ellipse / rhombus / hexagon …）
+    let shape = String(st.shape || '').toLowerCase();
+    if (!shape) {
+      for (const k of ['ellipse', 'rhombus', 'hexagon', 'triangle', 'cylinder', 'document', 'text', 'parallelogram', 'trapezoid', 'circle']) {
+        if (st[k] === '1') { shape = k; break; }
+      }
+    }
+    if (!shape) shape = st.rounded === '1' ? 'rounded' : 'rect';
+    // draw.io 里常带版本号或别名：cylinder3 / datastore / circle …
+    shape = shape.replace(/[0-9]+$/, '');
+    const alias = {
+      circle: 'ellipse', datastore: 'cylinder', database: 'cylinder',
+      callout: 'rounded', swimlane: 'rect', process: 'rounded', note: 'document',
+      'parallelogram': 'parallelogram', 'trapezoid': 'trapezoid',
+    };
+    if (alias[shape]) shape = alias[shape];
     nodes.push({
       id: xmlAttr(head, 'id'),
       text: text.replace(/\n/g, ' ').trim(),
@@ -102,6 +118,7 @@ function parseDiagramNodes(xml) {
       fill: st.fillColor || '#f6f7fb',
       stroke: st.strokeColor || '#9aa3b2',
       rounded: st.rounded === '1',
+      shape,
       fontSize: Number(st.fontSize) || 13,
       bold: st.fontStyle === '1',
     });
@@ -567,6 +584,60 @@ const handlers = {
     };
   },
 
+  // ---- 卡片编辑器进阶：恢复原版 / 换图 / 关系增删 ----
+  'POST /api/card/:id/revert': (p) => {
+    const c = db.prepare('SELECT * FROM card WHERE id=?').get(p.id);
+    if (!c) throw new Error('卡片不存在');
+    if (!c.orig_front) throw new Error('这张卡没有保存原始版本');
+    db.prepare('UPDATE card SET front=?, back=? WHERE id=?')
+      .run(c.orig_front, c.orig_back || c.back, p.id);
+    return { ok: true, front: c.orig_front, back: c.orig_back };
+  },
+
+  'POST /api/card/:id/image': (p, b) => {
+    const c = db.prepare('SELECT * FROM card WHERE id=?').get(p.id);
+    if (!c) throw new Error('卡片不存在');
+    const src = String(b.path || '');
+    if (!src || !existsSync(src)) throw new Error('找不到这个文件：' + src);
+    const base = process.env.MIAOMIAO_DATA || join(ROOT, 'data');
+    const dir = join(base, 'images', c.course_id);
+    mkdirSync(dir, { recursive: true });
+    const ext = (src.match(/\.[a-z0-9]+$/i) || ['.png'])[0].toLowerCase();
+    const name = `card_${p.id}${ext}`;
+    copyFileSync(src, join(dir, name));
+    const rel = `images/${c.course_id}/${name}`;
+    db.prepare('UPDATE card SET image_path=? WHERE id=?').run(rel, p.id);
+    return { ok: true, image_path: rel };
+  },
+
+  'POST /api/card/:id/image-remove': (p) => {
+    db.prepare('UPDATE card SET image_path=NULL WHERE id=?').run(p.id);
+    return { ok: true };
+  },
+
+  'POST /api/relation/add': (p, b) => {
+    const fromCard = String(b.from || '');
+    const toCard = String(b.to || '');
+    if (!fromCard || !toCard || fromCard === toCard) throw new Error('两端都要选，且不能是同一张卡');
+    const cf = db.prepare('SELECT id, concept_id, course_id FROM card WHERE id=?').get(fromCard);
+    const ct = db.prepare('SELECT id, concept_id, course_id FROM card WHERE id=?').get(toCard);
+    if (!cf || !ct) throw new Error('卡片不存在');
+    const dup = db.prepare(
+      'SELECT id FROM relation WHERE (from_concept=? AND to_concept=?) OR (from_concept=? AND to_concept=?)'
+    ).get(cf.concept_id, ct.concept_id, ct.concept_id, cf.concept_id);
+    if (dup) throw new Error('这两个概念已经有关联了');
+    const info = db.prepare('INSERT INTO relation(course_id,from_concept,to_concept,kind) VALUES(?,?,?,?)')
+      .run(cf.course_id, cf.concept_id, ct.concept_id, 'manual');
+    return { ok: true, id: Number(info.lastInsertRowid) };
+  },
+
+  'POST /api/relation/delete': (p, b) => {
+    const id = Number(b.id);
+    if (!Number.isFinite(id)) throw new Error('关系编号不对');
+    db.prepare('DELETE FROM relation WHERE id=?').run(id);
+    return { ok: true };
+  },
+
   // ---- 导出：卡片清单（Markdown / CSV） ----
   'GET /api/export/cards/:id': (p) => {
     const fmt = p.query?.format === 'csv' ? 'csv' : 'md';
@@ -942,7 +1013,7 @@ const handlers = {
       fileName,
     };
     const rels = db.prepare(`
-      SELECT r.kind, r.from_concept, r.to_concept,
+      SELECT r.id AS rel_id, r.kind, r.from_concept, r.to_concept,
              cf.front AS from_front, ct.front AS to_front, cf.id AS from_card, ct.id AS to_card
       FROM relation r
       LEFT JOIN concept cf2 ON cf2.id=r.from_concept
