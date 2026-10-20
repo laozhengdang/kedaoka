@@ -651,6 +651,7 @@ function showAbout() {
   const b = $('#aboutBody');
   b.innerHTML = `
     <p><b>老郑荡的妙妙小工具</b> · v1</p>
+    <p class="sub">界面版本：${esc(document.lastModified || '未知')}　（这个时间要跟源码一致，否则就是没打包成功）</p>
     <p class="sub">课件 → 知识卡 → 间隔重复复习。所有数据都在本机，不上传。</p>
     <p class="sub">GitHub：github.com/laozhengdang（开源版是空白工具，课程数据不在仓库里）</p>
     <p class="sub">技术：Electron + node:sqlite + Python(PyMuPDF) + 任意 OpenAI 兼容接口</p>

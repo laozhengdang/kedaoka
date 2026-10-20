@@ -324,6 +324,18 @@ app.whenReady().then(async () => {
         return JSON.stringify({ panel: panel.replace(/\\n/g, ' | ').slice(0, 160) });
       })()`);
       log.push('AI 面板: ' + r10);
+      // 关键控件体检：确认新功能真的在界面上
+      const audit = await win.webContents.executeJavaScript(`JSON.stringify({
+        balance: (document.querySelector('#balanceText') || {}).textContent || '',
+        balanceBtn: !!document.querySelector('#btnBalance'),
+        shuffle: !!document.querySelector('#pShuffle'),
+        quotes: !!document.querySelector('#pQuotes'),
+        expMd: !!document.querySelector('#expMd'),
+        expCsv: !!document.querySelector('#expCsv'),
+        expBackup: !!document.querySelector('#expBackup'),
+        advClear: !!document.querySelector('#advClearQueue'),
+      })`);
+      log.push('控件体检: ' + audit);
       // 专注计时器外观
       try {
         const { writeFileSync } = await import('node:fs');
