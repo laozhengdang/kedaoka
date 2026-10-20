@@ -39,3 +39,7 @@ secrets.*
 
 # 内置 Python 运行环境（30MB+，不进仓库）
 runtime/
+
+# 开发期临时脚本与私有资料（不进仓库）
+_probe/
+*.bak
