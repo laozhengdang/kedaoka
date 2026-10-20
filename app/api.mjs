@@ -3,6 +3,7 @@
 
 import { spawn } from 'node:child_process';
 import zlib from 'node:zlib';
+import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, getProfile, setProfile, today, nowIso, uid } from './db.mjs';
@@ -829,13 +830,22 @@ export function callApi(method, rawPath, body = {}) {
 }
 
 // ---------- 导入（调用 python 解析，无 AI） ----------
+// 解析课件用的 Python：优先用随程序打包的内置运行环境（同学不用装 Python）
+const BUNDLED_PY = join(ROOT, 'runtime', 'python', 'python.exe');
+function pythonExe() {
+  try {
+    if (existsSync(BUNDLED_PY)) return BUNDLED_PY;
+  } catch { /* 忽略 */ }
+  return 'python';
+}
+
 const jobs = new Map();
 
 export function startImport(filePath, courseName, kind = 'theory') {
   const id = uid('job_');
   const job = { id, status: 'running', log: '', result: null };
   jobs.set(id, job);
-  const py = spawn('python', [join(ROOT, 'tools', 'ingest.py'),
+  const py = spawn(pythonExe(), [join(ROOT, 'tools', 'ingest.py'),
     '--file', filePath, '--course-name', courseName, '--kind', kind], {
     cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
   });

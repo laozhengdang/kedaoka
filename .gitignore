@@ -36,3 +36,6 @@ secrets.*
 *.db
 *.db-wal
 *.db-shm
+
+# 内置 Python 运行环境（30MB+，不进仓库）
+runtime/
