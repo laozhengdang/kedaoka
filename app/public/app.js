@@ -201,6 +201,9 @@ async function route() {
   if (parts[0] === 'browse' && parts[1]) return viewBrowse(parts[1]);
   if (parts[0] === 'graph' && parts[1]) return viewGraph(parts[1]);
   if (parts[0] === 'card' && parts[1]) return viewCard(parts[1]);
+  if (parts[0] === 'exam' && parts[1]) return viewExam(parts[1]);
+  if (parts[0] === 'broken' && parts[1]) return viewBroken(parts[1]);
+  if (parts[0] === 'outline' && parts[1]) return viewOutline(parts[1]);
   if (parts[0] === 'summary' && parts[1]) return viewSummary(parts[1]);
   if (parts[0] === 'settings') return viewSettings();
   return viewHome();
@@ -259,6 +262,8 @@ async function viewCourse(id) {
       <button id="btnImportHere" class="small primary">＋ 导入课件到本学科</button>
       <button id="btnRefine" class="small">用 AI 重新整理术语</button>
       <button id="btnOutline" class="small">一键复习清单</button>
+      <button id="btnExam" class="small">模拟考</button>
+      <button id="btnBroken" class="small">待修</button>
     </div>
     <div class="tabs">
       <div class="tab active" data-t="today">今天</div>
@@ -280,6 +285,10 @@ async function viewCourse(id) {
   if (ib) ib.onclick = () => openImport(d.course.name);
   const ob = w.querySelector('#btnOutline');
   if (ob) ob.onclick = () => startOutline(id);
+  const eb = w.querySelector('#btnExam');
+  if (eb) eb.onclick = () => { location.hash = `#/exam/${id}`; };
+  const bb = w.querySelector('#btnBroken');
+  if (bb) bb.onclick = () => { location.hash = `#/broken/${id}`; };
 
   const body = w.querySelector('#tabBody');
   if (!d.queue.total) {
@@ -296,13 +305,23 @@ async function viewCourse(id) {
     body.querySelector('.today-card').appendChild(b);
   } else if (consumedAll) {
     body.innerHTML = `<div class="today-card"><div class="big-num">✓</div>
-      <div class="sub">今天完成 ${d.queue.done} / ${d.queue.total}</div></div>`;
+      <div class="sub">今天完成 ${d.queue.done} / ${d.queue.total}</div>
+      ${d.queue.left ? `<div class="sub" style="margin-top:6px">今天还有 ${d.queue.left} 张新卡没排上</div>` : ''}</div>`;
     const row = el('div', 'row');
     row.style.marginTop = '16px';
     row.style.justifyContent = 'center';
     const b1 = el('button', 'primary', '看结算');
     b1.onclick = () => { location.hash = `#/summary/${id}`; };
+    const b2 = el('button', 'small', '再来一轮（随机 20 张）');
+    b2.onclick = async () => {
+      b2.disabled = true;
+      b2.textContent = '正在排卡…';
+      const r = await api('POST', `/api/queue/extra/${id}`, { count: 20 });
+      toast(`已排好第 ${r.round + 1} 轮，共 ${r.count} 张`);
+      await viewCourse(id);
+    };
     row.appendChild(b1);
+    row.appendChild(b2);
     body.querySelector('.today-card').appendChild(row);
   } else {
     const left = d.queue.total - d.queue.done;
@@ -526,6 +545,136 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// ---------------- 考试模式 ----------------
+async function viewExam(courseId) {
+  STATE.current = courseId;
+  renderSidebar();
+  const q = Number(new URLSearchParams((location.hash.split('?')[1] || '')).get('n')) || 20;
+  const d = await api('GET', `/api/exam/${courseId}?n=${q}`);
+  const m = $('#main');
+  m.innerHTML = '';
+  const w = el('div', 'wrap');
+  if (!d.cards.length) {
+    w.innerHTML = `<h1>模拟考</h1><p class="sub">这门课还没有可考的卡片。</p>`;
+    m.appendChild(w);
+    return;
+  }
+  let i = 0;
+  let revealed = false;
+  const marks = [];   // true=对 false=错
+
+  w.innerHTML = `
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <span class="sub" id="exCount"></span>
+      <button class="ghost small" id="exQuit">退出考试</button>
+    </div>
+    <div class="today-card exam-card">
+      <div class="ex-term" id="exFront"></div>
+      <div class="ex-ans" id="exBack"></div>
+      <div class="sub" id="exSrc"></div>
+    </div>
+    <div class="row" style="justify-content:center;margin-top:18px">
+      <button id="exShow" class="primary">看答案（空格）</button>
+      <button id="exRight" class="small" style="display:none">答对了（←）</button>
+      <button id="exWrong" class="small" style="display:none">答错了（→）</button>
+    </div>`;
+  m.appendChild(w);
+
+  const paint = () => {
+    const c = d.cards[i];
+    $('#exCount').textContent = `${i + 1} / ${d.cards.length}　答对 ${marks.filter(Boolean).length}`;
+    $('#exFront').textContent = c.front;
+    $('#exBack').textContent = c.back || '（没有释义）';
+    $('#exBack').style.visibility = revealed ? 'visible' : 'hidden';
+    $('#exSrc').textContent = c.chapter ? `${c.chapter} · 第 ${c.source_page} 页` : `第 ${c.source_page} 页`;
+    $('#exShow').style.display = revealed ? 'none' : '';
+    $('#exRight').style.display = revealed ? '' : 'none';
+    $('#exWrong').style.display = revealed ? '' : 'none';
+  };
+
+  const answer = async (ok) => {
+    const c = d.cards[i];
+    marks.push(ok);
+    await api('POST', `/api/exam/${courseId}/result`, { cardId: c.id, correct: ok });
+    i += 1;
+    revealed = false;
+    if (i >= d.cards.length) return finish();
+    paint();
+  };
+
+  const finish = () => {
+    const right = marks.filter(Boolean).length;
+    w.innerHTML = `
+      <h1>考完了</h1>
+      <p class="sub">${esc(d.course)} · ${d.cards.length} 题</p>
+      <div class="today-card" style="text-align:center">
+        <div class="big-num">${right} / ${d.cards.length}</div>
+        <div class="sub">正确率 ${Math.round(right / d.cards.length * 100)}%</div>
+        <p class="hint" style="margin-top:10px">答错的题已经按「完全不记得」重置，明天会重新出现。</p>
+      </div>
+      <div class="row" style="justify-content:center;margin-top:16px">
+        <button id="exAgain" class="primary small">再来一套</button>
+        <button id="exBack" class="ghost small">回课程</button>
+      </div>`;
+    $('#exAgain').onclick = () => { location.hash = `#/exam/${courseId}`; location.reload(); };
+    $('#exBack').onclick = () => { location.hash = `#/course/${courseId}`; };
+  };
+
+  $('#exShow').onclick = () => { revealed = true; paint(); };
+  $('#exRight').onclick = () => answer(true);
+  $('#exWrong').onclick = () => answer(false);
+  $('#exQuit').onclick = () => { location.hash = `#/course/${courseId}`; };
+
+  const key = (e) => {
+    if (!document.body.contains(w)) { window.removeEventListener('keydown', key); return; }
+    if (e.key === ' ') { e.preventDefault(); if (!revealed) { revealed = true; paint(); } }
+    if (e.key === 'ArrowLeft' && revealed) answer(true);
+    if (e.key === 'ArrowRight' && revealed) answer(false);
+  };
+  window.addEventListener('keydown', key);
+  paint();
+}
+
+// ---------------- 待修队列 ----------------
+async function viewBroken(courseId) {
+  STATE.current = courseId;
+  renderSidebar();
+  const d = await api('GET', `/api/broken/${courseId}`);
+  const cname = (STATE.courses.find((x) => x.id === courseId) || {}).name || '';
+  const m = $('#main');
+  m.innerHTML = '';
+  const w = el('div', 'wrap');
+  w.innerHTML = `
+    <div class="row" style="margin-bottom:10px">
+      <button class="ghost small" id="bkBack">← 返回课程</button>
+    </div>
+    <h1>待修 · ${esc(cname)}</h1>
+    <p class="sub">你标记过「释义有误 / 图配错」的卡片。修好点恢复，没救的点删除。</p>
+    <div class="detail" id="bkList"></div>`;
+  m.appendChild(w);
+  $('#bkBack').onclick = () => { location.hash = `#/course/${courseId}`; };
+  const list = $('#bkList');
+  if (!d.total) { list.innerHTML = '<p class="sub">没有待修的卡，干净。</p>'; return; }
+  for (const c of d.cards) {
+    const row = el('div', 'cardrow');
+    row.innerHTML = `<span class="t">${esc(c.front)}</span>
+      <span class="pg">第 ${c.source_page} 页</span>`;
+    const ok = el('button', 'small', '恢复');
+    ok.onclick = async () => {
+      await api('POST', `/api/card/${c.id}/restore`, {});
+      toast('已恢复到复习队列');
+      viewBroken(courseId);
+    };
+    const go = el('button', 'ghost small', '查看');
+    go.onclick = () => { location.hash = `#/card/${c.id}`; };
+    const box = el('span');
+    box.style.marginLeft = 'auto';
+    box.append(go, ok);
+    row.appendChild(box);
+    list.appendChild(row);
+  }
+}
+
 // ---------------- 结算 ----------------
 async function viewSummary(id) {
   const s = await api('GET', `/api/summary/${id}`);
@@ -553,7 +702,16 @@ async function viewSummary(id) {
   b1.onclick = () => { location.hash = `#/course/${id}`; };
   const b2 = el('button', 'ghost', '看仓库');
   b2.onclick = () => { location.hash = `#/browse/${id}`; };
-  row.append(b1, b2);
+  const b3 = el('button', 'small', '再来一轮（随机 20 张）');
+  b3.onclick = async () => {
+    b3.disabled = true;
+    b3.textContent = '正在排卡…';
+    const r = await api('POST', `/api/queue/extra/${id}`, { count: 20 });
+    toast(`已排好第 ${r.round + 1} 轮，共 ${r.count} 张`);
+    location.hash = `#/course/${id}`;
+    await viewCourse(id);
+  };
+  row.append(b1, b2, b3);
   w.appendChild(row);
   m.appendChild(w);
 }

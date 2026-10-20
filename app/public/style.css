@@ -255,3 +255,9 @@ textarea { min-height: 120px; font-family: var(--serif); }
   font-size: 22px; color: var(--accent); pointer-events: none;
   font-family: var(--serif);
 }
+
+/* ---------- 考试模式 ---------- */
+.exam-card { text-align: center; padding: 40px 24px; }
+.ex-term { font-family: var(--serif); font-size: 40px; letter-spacing: 1px; }
+.ex-ans { margin-top: 18px; font-size: 16px; line-height: 1.9; color: #333; max-width: 620px; margin-left: auto; margin-right: auto; }
+.cardrow .pg { margin-left: 8px; }

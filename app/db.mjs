@@ -1,4 +1,4 @@
-﻿// db.mjs —— 数据库：建表 + 迁移 + 常用操作
+// db.mjs —— 数据库：建表 + 迁移 + 常用操作
 // 用 Node 24 内置的 node:sqlite，不需要编译任何原生模块。
 
 import { DatabaseSync } from 'node:sqlite';
@@ -143,6 +143,26 @@ CREATE TABLE IF NOT EXISTS profile (key TEXT PRIMARY KEY, value TEXT);
 
 db.exec(SCHEMA);
 ensureColumn('card', 'file_id', 'file_id TEXT');
+
+// 队列支持"再来一轮"：给 daily_queue 加 round，并把唯一约束改成四列
+if (!db.prepare('PRAGMA table_info(daily_queue)').all().map((c) => c.name).includes('round')) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS daily_queue_v2 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      course_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      round INTEGER NOT NULL DEFAULT 0,
+      card_id TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      done INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(course_id, date, round, card_id)
+    );
+    INSERT OR IGNORE INTO daily_queue_v2(course_id,date,round,card_id,position,done)
+      SELECT course_id,date,0,card_id,position,done FROM daily_queue;
+    DROP TABLE daily_queue;
+    ALTER TABLE daily_queue_v2 RENAME TO daily_queue;
+  `);
+}
 
 export const DEFAULT_PROFILE = {
   daily_new_max: 10,

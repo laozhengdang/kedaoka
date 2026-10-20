@@ -55,6 +55,22 @@ export function schedule(cardId, rating, auto = 0) {
   return { state, interval_days: iv, due_at: due };
 }
 
+function latestRound(courseId, date) {
+  const r = db.prepare('SELECT MAX(round) AS r FROM daily_queue WHERE course_id=? AND date=?')
+    .get(courseId, date).r;
+  return r === null || r === undefined ? 0 : r;
+}
+
+// 标记"这张卡在今天这一轮已完成"
+function markQueueDone(cardId) {
+  const row = db.prepare('SELECT course_id FROM card WHERE id=?').get(cardId);
+  if (!row) return;
+  const date = today();
+  const round = latestRound(row.course_id, date);
+  db.prepare('UPDATE daily_queue SET done=1 WHERE card_id=? AND date=? AND round=?')
+    .run(cardId, date, round);
+}
+
 export function ensureQueue(courseId) {
   const date = today();
   const has = db.prepare('SELECT COUNT(*) n FROM daily_queue WHERE course_id=? AND date=?')
@@ -77,19 +93,57 @@ export function ensureQueue(courseId) {
     ...fresh.slice(0, p.daily_new_max),
     ...due.slice(0, p.daily_review_max),
   ];
-  const ins = db.prepare('INSERT OR IGNORE INTO daily_queue(course_id,date,card_id,position) VALUES(?,?,?,?)');
+  const ins = db.prepare(
+    'INSERT OR IGNORE INTO daily_queue(course_id,date,round,card_id,position) VALUES(?,?,0,?,?)');
   picked.forEach((c, i) => ins.run(courseId, date, c.id, i));
+}
+
+// 再来一轮：随机抽一批（默认 20），不占用当天的 10 张额度
+export function extraRound(courseId, count = 20) {
+  const date = today();
+  ensureQueue(courseId);
+  const round = latestRound(courseId, date) + 1;
+
+  const done = new Set(db.prepare(
+    'SELECT card_id FROM daily_queue WHERE course_id=? AND date=? AND round=?')
+    .all(courseId, date, round - 1).map((r) => r.card_id));
+
+  const pool = db.prepare(`
+    SELECT c.id, c.importance, COALESCE(s.state,'new') st
+    FROM card c LEFT JOIN card_state s ON s.card_id=c.id
+    WHERE c.course_id=? AND c.status='active' AND c.is_title=0`).all(courseId);
+
+  // 优先没刷过的，不够再补刷过的；同分打乱
+  const fresh = pool.filter((c) => !done.has(c.id));
+  const again = pool.filter((c) => done.has(c.id));
+  const shuffle = (arr) => arr.map((v) => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+  const picked = [...shuffle(fresh), ...shuffle(again)].slice(0, Math.max(1, count));
+
+  const ins = db.prepare(
+    'INSERT OR IGNORE INTO daily_queue(course_id,date,round,card_id,position) VALUES(?,?,?,?,?)');
+  picked.forEach((c, i) => ins.run(courseId, date, round, c.id, i));
+  return { round, count: picked.length };
 }
 
 export function queueState(courseId) {
   const date = today();
   ensureQueue(courseId);
+  const round = latestRound(courseId, date);
   const rows = db.prepare(`
     SELECT q.card_id, q.done, q.position, c.front, c.back, c.importance, c.source_page, c.image_path
     FROM daily_queue q JOIN card c ON c.id=q.card_id
-    WHERE q.course_id=? AND q.date=?
-    ORDER BY q.done, q.position`).all(courseId, date);
-  return { date, total: rows.length, done: rows.filter((r) => r.done).length, cards: rows };
+    WHERE q.course_id=? AND q.date=? AND q.round=?
+    ORDER BY q.done, q.position`).all(courseId, date, round);
+
+  // 今天没排上的剩余新卡，用来提示"还有 N 张没刷"
+  const left = db.prepare(`
+    SELECT COUNT(*) n FROM card c LEFT JOIN card_state s ON s.card_id=c.id
+    WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+      AND COALESCE(s.state,'new')='new'
+      AND c.id NOT IN (SELECT card_id FROM daily_queue WHERE course_id=? AND date=?)`)
+    .get(courseId, courseId, date).n;
+
+  return { date, round, total: rows.length, done: rows.filter((r) => r.done).length, left, cards: rows };
 }
 
 // ---------- 路由表 ----------
@@ -123,8 +177,53 @@ const handlers = {
     const st = schedule(cardId, rating, auto);
     db.prepare('INSERT INTO review_log(card_id,ts,rating,auto,human_importance,latency_ms) VALUES(?,?,?,?,?,?)')
       .run(cardId, nowIso(), rating, auto ? 1 : 0, humanImportance, latencyMs);
-    db.prepare('UPDATE daily_queue SET done=1 WHERE card_id=? AND date=?').run(cardId, today());
+    markQueueDone(cardId);
     if (humanImportance !== null) db.prepare('UPDATE card SET importance=? WHERE id=?').run(humanImportance, cardId);
+    return { ok: true, state: st };
+  },
+
+  'POST /api/queue/extra/:id': (p, b) => {
+    const r = extraRound(p.id, Number(b?.count) || 20);
+    return { ok: true, ...r, queue: queueState(p.id) };
+  },
+
+  // ---- 待修队列：被标记「释义有误 / 图配错」的卡 ----
+  'GET /api/broken/:id': (p) => {
+    const rows = db.prepare(`
+      SELECT id, front, back, source_page, image_path, origin FROM card
+      WHERE course_id=? AND status='broken' ORDER BY source_page`).all(p.id);
+    return { total: rows.length, cards: rows };
+  },
+  'POST /api/card/:id/restore': (p) => {
+    db.prepare("UPDATE card SET status='active' WHERE id=?").run(p.id);
+    db.prepare('INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?) ON CONFLICT(card_id) DO NOTHING')
+      .run(p.id, 'new', nowIso());
+    return { ok: true };
+  },
+
+  // ---- 考试模式：随机抽 N 张，答完给分 ----
+  'GET /api/exam/:id': (p) => {
+    const n = Math.max(5, Math.min(100, Number(p.query?.n) || 20));
+    const rows = db.prepare(`
+      SELECT c.id, c.front, c.back, c.importance, c.source_page, c.image_path, pg.chapter
+      FROM card c
+      LEFT JOIN page pg ON pg.id = (
+        SELECT p2.id FROM page p2
+        WHERE p2.file_id = COALESCE(c.file_id, p2.file_id) AND p2.page_no = c.source_page
+          AND p2.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
+        ORDER BY p2.id LIMIT 1)
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+      ORDER BY RANDOM() LIMIT ?`).all(p.id, n);
+    const course = db.prepare('SELECT name FROM course WHERE id=?').get(p.id);
+    return { course: course?.name || '', cards: rows, total: rows.length };
+  },
+  'POST /api/exam/:id/result': (_p, b) => {
+    const { cardId, correct } = b || {};
+    if (!cardId) throw new Error('缺少 cardId');
+    // 答对当"记得但没把握"（2），答错按"完全不会"（4）重置
+    const st = schedule(cardId, correct ? 2 : 4, 1);
+    db.prepare('INSERT INTO review_log(card_id,ts,rating,auto,human_importance,latency_ms) VALUES(?,?,?,?,?,?)')
+      .run(cardId, nowIso(), correct ? 2 : 4, 1, null, null);
     return { ok: true, state: st };
   },
 
@@ -132,7 +231,7 @@ const handlers = {
     db.prepare("UPDATE card SET status='broken' WHERE id=?").run(p.id);
     db.prepare('INSERT INTO review_log(card_id,ts,rating,auto,human_importance,latency_ms) VALUES(?,?,?,?,?,?)')
       .run(p.id, nowIso(), -1, 0, null, null);
-    db.prepare('UPDATE daily_queue SET done=1 WHERE card_id=? AND date=?').run(p.id, today());
+    markQueueDone(p.id);
     return { ok: true };
   },
 
