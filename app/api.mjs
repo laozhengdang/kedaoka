@@ -1,4 +1,4 @@
-﻿// api.mjs —— 所有业务逻辑都在这里，服务端和桌面端共用同一份。
+// api.mjs —— 所有业务逻辑都在这里，服务端和桌面端共用同一份。
 // server.mjs（网页版）调 callApi；electron/main.mjs（桌面版）也调 callApi。
 
 import { spawn } from 'node:child_process';
@@ -914,7 +914,24 @@ const handlers = {
       WHERE q.course_id=? AND q.date=? AND l.rating>0 GROUP BY l.rating`).all(date, p.id, date);
     const dist = { 1: 0, 2: 0, 3: 0, 4: 0 };
     for (const r of rows) dist[r.rating] = r.n;
-    return { dist, total: Object.values(dist).reduce((a, b) => a + b, 0), date };
+
+    // 今天标了「以后不用再考」的卡（结算页批量复核）
+    const graduatedToday = db.prepare(`
+      SELECT c.id, c.front FROM review_log l JOIN card c ON c.id=l.card_id
+      WHERE c.course_id=? AND l.rating=1 AND substr(l.ts,1,10)=?
+      ORDER BY l.ts DESC`).all(p.id, date);
+
+    // 明天到期的复习量
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const dueTomorrow = db.prepare(`
+      SELECT COUNT(*) n FROM card c JOIN card_state s ON s.card_id=c.id
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+        AND s.due_at IS NOT NULL AND substr(s.due_at,1,10)=?`).get(p.id, tomorrow).n;
+
+    return {
+      dist, total: Object.values(dist).reduce((a, b) => a + b, 0),
+      date, graduatedToday, dueTomorrow,
+    };
   },
 
   'GET /api/settings': () => ({ profile: getProfile() }),

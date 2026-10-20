@@ -1,4 +1,4 @@
-﻿"""ingest.py —— 把一份 PDF 课件变成卡片（无 AI 降级模式，见文档 24.10）
+"""ingest.py —— 把一份 PDF 课件变成卡片（无 AI 降级模式，见文档 24.10）
 
 做的事：
   1. sha256 去重，同一份文件不会导入两次
@@ -447,6 +447,49 @@ def main():
             if color in STRONG:
                 d["color"] = color
     doc.close()
+
+    # 2.2) 考纲：不按颜色猜，直接按行拆考点
+    if args.doc_type == "syllabus":
+        syllabus_cards = 0
+        heading_re = re.compile(r"^(第[一二三四五六七八九十0-9]+[章节]|[一二三四五六七八九十]+、|[0-9]{1,2}[.、])")
+        for pno in sorted(page_cache):
+            for ln in page_cache[pno]:
+                text = norm(ln.get("text", ""))
+                if not (4 <= len(text) <= 40):
+                    continue
+                name = re.sub(r"^[0-9０-９]{1,2}[.、)）]\s*", "", text)
+                name = re.sub(r"^[（(][0-9０-９]{1,2}[)）]\s*", "", name).strip()
+                if not name or name in ("目录", "前言", "附录"):
+                    continue
+                is_heading = bool(heading_re.match(name)) and len(name) <= 20
+                exists = conn.execute(
+                    "SELECT c.id FROM term t JOIN concept c ON c.id=t.concept_id "
+                    "WHERE t.text=? AND c.course_id=? AND t.kind='preferred'", (name, course_id)
+                ).fetchone()
+                if exists:
+                    continue
+                concept_id = uid("cp_")
+                conn.execute("INSERT INTO concept(id,course_id,type,created_at) VALUES(?,?,?,?)",
+                             (concept_id, course_id, "unknown", now()))
+                conn.execute("INSERT INTO term(concept_id,text,kind,origin) VALUES(?,?,?,?)",
+                             (concept_id, name, "preferred", "syllabus"))
+                card_id = uid("card_")
+                conn.execute(
+                    "INSERT INTO card(id,course_id,concept_id,front,back,image_path,source_page,source_text,"
+                    "importance,origin,status,is_title,file_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (card_id, course_id, concept_id, name, "（考纲要求，释义待补）", None, pno, text,
+                     5 if not is_heading else 4, args.doc_type, "active", 1 if is_heading else 0, fid, now()),
+                )
+                conn.execute("INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?)",
+                             (card_id, "new", now()))
+                syllabus_cards += 1
+        conn.commit()
+        total = conn.execute("SELECT COUNT(*) FROM card WHERE course_id=?", (course_id,)).fetchone()[0]
+        print(json.dumps({
+            "ok": True, "kind": "syllabus", "created": syllabus_cards,
+            "file_id": fid, "course_id": course_id, "total_cards": total,
+        }, ensure_ascii=False))
+        return
 
     # 2.5) 把"页标题"也当成概念收进来——它们是"包括/分为"的上位概念
     for pno, t in page_main_term.items():

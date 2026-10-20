@@ -1889,10 +1889,35 @@ async function viewSummary(id) {
       <div class="big-num" style="text-align:center">${s.total} / ${d.queue.total}</div>
       <div class="sub" style="text-align:center;margin-bottom:18px">张</div>
       <div>记得且不再考 <b>${dist[1] || 0}</b></div>
-      <div>记得不看不看概念 <b>${dist[2] || 0}</b></div>
+      <div>记得，不用看概念 <b>${dist[2] || 0}</b></div>
       <div>模糊 <b>${dist[3] || 0}</b></div>
       <div>完全不记得 <b>${dist[4] || 0}</b></div>
-    </div>`;
+      <div class="sub" style="margin-top:12px">明天到期复习 <b>${s.dueTomorrow || 0}</b> 张</div>
+    </div>
+    ${(s.graduatedToday && s.graduatedToday.length)
+    ? `<h2 style="margin-top:22px">今天标了「以后不用再考」的 ${s.graduatedToday.length} 张</h2>
+         <p class="sub">扫一眼，标错了就点掉——点掉的那张会回到抽检池。</p>
+         <div class="detail" id="gradList"></div>`
+    : ''}`;
+  if (s.graduatedToday && s.graduatedToday.length) {
+    const list = w.querySelector('#gradList');
+    for (const c of s.graduatedToday) {
+      const line = el('div', 'cardrow');
+      line.innerHTML = `<span class="t">${esc(c.front)}</span>`;
+      const undo = el('button', 'ghost small', '这张不该毕业');
+      undo.onclick = async () => {
+        await api('POST', `/api/card/${c.id}`, { importance: 3 });
+        await api('POST', '/api/review', { cardId: c.id, rating: 4 });
+        line.remove();
+        toast('已放回复习队列');
+      };
+      const box = el('span');
+      box.style.marginLeft = 'auto';
+      box.appendChild(undo);
+      line.appendChild(box);
+      list.appendChild(line);
+    }
+  }
   const row = el('div', 'row');
   row.style.marginTop = '16px';
   const b1 = el('button', 'primary', '回课程');
