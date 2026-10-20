@@ -17,6 +17,7 @@ if (!process.env.MIAOMIAO_DATA) {
 
 // 冒烟测试：electron . --smoke 时只跑一遍 API 然后退出（不需要显示器）
 const SMOKE = process.argv.includes('--smoke');
+const SELFCHECK = process.argv.includes('--selfcheck');
 // UI 测试：真的点进复习屏，读 DOM，确认卡片渲染出来了
 const UITEST = process.argv.includes('--uitest');
 
@@ -122,6 +123,18 @@ ipcMain.handle('drop-file', async (_e, payload = {}) => {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
+
+  if (SELFCHECK) {
+    try {
+      const { runSelfCheck } = await import('../../tools/selfcheck.mjs');
+      const lines = await runSelfCheck(process.env.MIAOMIAO_DATA || join(HERE, '..', '..', 'data'));
+      console.log(lines.join('\n'));
+    } catch (e) {
+      console.log('自检失败：' + (e && e.message ? e.message : e));
+    }
+    app.quit();
+    return;
+  }
 
   if (SMOKE) {
     const { callApi } = await import('../api.mjs');
