@@ -1,4 +1,4 @@
-// db.mjs —— 数据库：建表 + 迁移 + 常用操作
+﻿// db.mjs —— 数据库：建表 + 迁移 + 常用操作
 // 用 Node 24 内置的 node:sqlite，不需要编译任何原生模块。
 
 import { DatabaseSync } from 'node:sqlite';
@@ -16,6 +16,12 @@ mkdirSync(dirname(DB_PATH), { recursive: true });
 export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
+
+// 轻量迁移：老库里缺的列，启动时补上（不改动已有数据）
+function ensureColumn(table, column, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -83,6 +89,7 @@ CREATE TABLE IF NOT EXISTS card (
   origin TEXT NOT NULL DEFAULT 'ppt',
   status TEXT NOT NULL DEFAULT 'active',
   is_title INTEGER NOT NULL DEFAULT 0,
+  file_id TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_card_course ON card(course_id);
@@ -135,6 +142,7 @@ CREATE TABLE IF NOT EXISTS profile (key TEXT PRIMARY KEY, value TEXT);
 `;
 
 db.exec(SCHEMA);
+ensureColumn('card', 'file_id', 'file_id TEXT');
 
 export const DEFAULT_PROFILE = {
   daily_new_max: 10,

@@ -146,7 +146,8 @@ const handlers = {
                LEFT JOIN card_state s ON s.card_id=c.id
                LEFT JOIN page pg ON pg.id = (
                  SELECT p2.id FROM page p2
-                 WHERE p2.page_no = c.source_page
+                 WHERE p2.file_id = COALESCE(c.file_id, p2.file_id)
+                   AND p2.page_no = c.source_page
                    AND p2.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
                  ORDER BY p2.id LIMIT 1)
                LEFT JOIN source_file sf ON sf.id=pg.file_id
@@ -172,7 +173,9 @@ const handlers = {
     const src = db.prepare(`
       SELECT sf.path AS file_path, pg.chapter AS chapter
       FROM page pg JOIN source_file sf ON sf.id=pg.file_id
-      WHERE pg.page_no=? AND sf.course_id=? LIMIT 1`).get(c.source_page, c.course_id);
+      WHERE pg.page_no=? AND sf.course_id=?
+        AND (? IS NULL OR pg.file_id = ?)
+      LIMIT 1`).get(c.source_page, c.course_id, c.file_id, c.file_id);
     const fileName = src && src.file_path ? String(src.file_path).split(/[\\/]/).pop() : '';
     const source = {
       page: c.source_page,

@@ -661,10 +661,10 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false) {
     list.appendChild(el('div', 'group-title', `第 ${pg} 页`));
     for (const c of groups[pg]) {
       const row = el('div', 'cardrow');
-      const where = c.chapter ? `${esc(c.chapter)} · p${c.source_page}` : `p${c.source_page}`;
+      const where = c.chapter ? `${esc(c.chapter)} · 第 ${c.source_page} 页` : `第 ${c.source_page} 页`;
       row.innerHTML = `<span class="t">${esc(c.front)}</span>
         <span class="star">${stars(c.importance)}</span>
-        <span class="pg">${where}</span>`;
+        <span class="pg" title="${esc(c.fileName || '')}">${where}</span>`;
       row.onclick = () => { location.hash = `#/card/${c.id}`; };
       list.appendChild(row);
     }
@@ -1013,6 +1013,37 @@ function mdToHtml(md) {
   return out;
 }
 
+// 导入完成后立刻问一句：要不要顺手用 AI 整理（省得用户自己找按钮）
+async function askRefineAfterImport(courseName) {
+  const b = await api('GET', '/api/bootstrap');
+  const c = b.courses.find((x) => x.name === courseName);
+  if (!c) return;
+  const cfg = await api('GET', '/api/ai/config');
+
+  const box = el('div', 'modal');
+  box.innerHTML = `
+    <div class="modal-box" style="width:560px">
+      <h3>导入完成 · ${esc(courseName)}</h3>
+      <p class="hint">已按课件排版做了一版卡片。要不要现在用 AI 重新整理一遍术语？
+        ${cfg.hasKey ? '' : '<br><b>还没配 API Key，先去设置里填。</b>'}</p>
+      <div class="row">
+        <button id="aiNow" class="primary">现在用 AI 整理</button>
+        <button id="aiLater" class="ghost">以后再说</button>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+  $('#aiLater').onclick = () => { box.remove(); location.hash = `#/course/${c.id}`; };
+  $('#aiNow').onclick = async () => {
+    box.remove();
+    if (!cfg.hasKey && cfg.baseUrl !== 'mock') {
+      toast('还没配置 API Key');
+      location.hash = '#/settings';
+      return;
+    }
+    await startRefine(c.id);
+  };
+}
+
 // ---------------- 导入 ----------------
 // 从学科里点进来时带上学名，输入框锁住，避免导错学科
 function openImport(courseName) {
@@ -1047,11 +1078,11 @@ async function doImport() {
       clearInterval(poll);
       $('#importGo').disabled = false;
       if (j.status === 'done') {
-        toast('导入完成');
         const b = await api('GET', '/api/bootstrap');
         STATE.courses = b.courses;
         renderSidebar();
-        setTimeout(() => { $('#importModal').classList.add('hidden'); }, 900);
+        $('#importModal').classList.add('hidden');
+        askRefineAfterImport(courseName);
       } else {
         const tail = (j.log || '').split('\n').filter(Boolean).slice(-3).join(' ');
         if (/文件不存在/.test(j.log || '')) {

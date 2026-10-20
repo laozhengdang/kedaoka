@@ -462,9 +462,9 @@ def main():
         is_title = 1 if info.get("is_title") else 0
         conn.execute(
             "INSERT INTO card(id,course_id,concept_id,front,back,image_path,source_page,source_text,"
-            "importance,origin,status,is_title,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "importance,origin,status,is_title,file_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (card_id, course_id, concept_id, term, back, img, first, back,
-             4 if is_title else star, "ppt", "active", is_title, now()),
+             4 if is_title else star, "ppt", "active", is_title, fid, now()),
         )
         conn.execute("INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?)",
                      (card_id, "new", now()))

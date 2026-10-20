@@ -363,10 +363,10 @@ async function runRefine(courseId, job) {
   if (old) job.log.push(`先把上次的 ${old} 张 AI 卡归档，重新来过`);
 
   const pages = db.prepare(`
-    SELECT p.page_no, p.text FROM page p
+    SELECT p.page_no, p.text, p.file_id FROM page p
     JOIN source_file f ON f.id = p.file_id
     WHERE f.course_id = ? AND length(p.text) > 20
-    ORDER BY p.page_no`).all(courseId);
+    ORDER BY f.imported_at, p.page_no`).all(courseId);
 
   job.total = pages.length;
   const batch = Math.max(1, cfg.pagesPerRequest || 3);
@@ -464,9 +464,11 @@ function acceptTerm(t) {
 }
 
 function applyTerms(courseId, parsed, chunk, job) {
-  const pageOf = new Map();
-  for (const c of chunk) pageOf.set(c.page_no, c.text);
   const firstPage = chunk[0].page_no;
+  // 页码 -> 文件：同一批页来自同一个文件时，用它给卡片标出处
+  const fileOfPage = new Map();
+  for (const c of chunk) if (c.file_id) fileOfPage.set(c.page_no, c.file_id);
+  const defaultFile = chunk.length && chunk[0].file_id ? chunk[0].file_id : null;
 
   for (const raw of parsed.terms || []) {
     const ok = acceptTerm(raw);
@@ -476,9 +478,11 @@ function applyTerms(courseId, parsed, chunk, job) {
 
     const exists = db.prepare(
       'SELECT id FROM card WHERE course_id=? AND front=?').get(courseId, name);
+    const fileId = fileOfPage.get(page) || defaultFile;
     if (exists) {
-      db.prepare(`UPDATE card SET back=?, importance=?, origin='ai', status='active' WHERE id=?`)
-        .run(def, imp, exists.id);
+      db.prepare(`UPDATE card SET back=?, importance=?, origin='ai', status='active',
+                  file_id=COALESCE(?, file_id) WHERE id=?`)
+        .run(def, imp, fileId, exists.id);
       job.updated += 1;
       continue;
     }
@@ -496,8 +500,8 @@ function applyTerms(courseId, parsed, chunk, job) {
     }
     const cardId = uid('card_');
     db.prepare(`INSERT INTO card(id,course_id,concept_id,front,back,image_path,source_page,source_text,
-      importance,origin,status,is_title,created_at) VALUES(?,?,?,?,?,NULL,?,?,?,'ai','active',0,?)`)
-      .run(cardId, courseId, conceptId, name, def, page, def, imp, nowIso());
+      importance,origin,status,is_title,file_id,created_at) VALUES(?,?,?,?,?,NULL,?,?,?,'ai','active',0,?,?)`)
+      .run(cardId, courseId, conceptId, name, def, page, def, imp, fileId, nowIso());
     db.prepare('INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?)')
       .run(cardId, 'new', nowIso());
     job.created += 1;
