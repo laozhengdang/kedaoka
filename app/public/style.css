@@ -542,3 +542,13 @@ html[data-theme="dark"] .streak-badge { background: #3a2f14; border-color: #6b57
 .tool-balance.dead { color: var(--muted); }
 #balanceText { font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: var(--ink); }
 .tool-balance.low #balanceText { color: #a2620a; }
+
+/* ---------- 图片查看器 ---------- */
+.imgview { position: fixed; inset: 0; z-index: 110; background: rgba(12,12,14,.92); display: flex; flex-direction: column; }
+.imgview-bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; color: #ddd; font-size: 13px; }
+.imgview-ops { display: flex; gap: 8px; }
+.imgview-bar button { color: #ddd; border-color: rgba(255,255,255,.25); }
+.imgview-stage { flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.imgview-stage img { max-width: 92vw; max-height: 82vh; transform-origin: center center; transition: transform .05s linear; }
+.imgview-foot { display: flex; gap: 20px; padding: 12px 18px; color: #bcbcbc; font-size: 13px; }
+.imgview-foot a { color: #9fc1ff; cursor: pointer; }

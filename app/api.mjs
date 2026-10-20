@@ -209,10 +209,12 @@ export function ensureQueue(courseId) {
   const due = all.filter((c) => c.st !== 'new' && c.due_at && c.due_at <= now)
     .sort((a, b) => String(a.due_at).localeCompare(String(b.due_at)));
 
-  const picked = [
+  let picked = [
     ...fresh.slice(0, p.daily_new_max),
     ...due.slice(0, p.daily_review_max),
   ];
+  // 复习乱序：打散顺序，避免每天都是同一个排列
+  if (p.shuffle) picked = picked.map((v) => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
   const ins = db.prepare(
     'INSERT OR IGNORE INTO daily_queue(course_id,date,round,card_id,position) VALUES(?,?,0,?,?)');
   picked.forEach((c, i) => ins.run(courseId, date, c.id, i));
@@ -544,6 +546,69 @@ const handlers = {
     db.prepare('INSERT INTO card_state(card_id,state,due_at) VALUES(?,?,?) ON CONFLICT(card_id) DO NOTHING')
       .run(p.id, 'new', nowIso());
     return { ok: true };
+  },
+
+  // ---- 图片查看器：这张图的前后邻居（翻页用） ----
+  'GET /api/card/:id/images': (p) => {
+    const c = db.prepare('SELECT id, course_id, source_page, image_path FROM card WHERE id=?').get(p.id);
+    if (!c) throw new Error('卡片不存在');
+    const rows = db.prepare(`
+      SELECT id, front, image_path, source_page FROM card
+      WHERE course_id=? AND status='active' AND image_path IS NOT NULL AND image_path <> ''
+      ORDER BY source_page, id`).all(c.course_id);
+    const i = rows.findIndex((r) => r.id === c.id);
+    return {
+      total: rows.length,
+      index: i,
+      current: c.image_path || '',
+      prev: i > 0 ? rows[i - 1] : null,
+      next: i >= 0 && i < rows.length - 1 ? rows[i + 1] : null,
+      all: rows.map((r) => ({ id: r.id, front: r.front, image_path: r.image_path, page: r.source_page })),
+    };
+  },
+
+  // ---- 导出：卡片清单（Markdown / CSV） ----
+  'GET /api/export/cards/:id': (p) => {
+    const fmt = p.query?.format === 'csv' ? 'csv' : 'md';
+    const c = db.prepare('SELECT name FROM course WHERE id=?').get(p.id);
+    const rows = db.prepare(`
+      SELECT c.front, c.back, c.importance, c.source_page,
+             pg.chapter AS ch, sf.path AS file_path
+      FROM card c
+      LEFT JOIN page pg ON pg.id = (
+        SELECT p2.id FROM page p2 WHERE p2.file_id = COALESCE(c.file_id, p2.file_id)
+          AND p2.page_no = c.source_page
+          AND p2.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
+        ORDER BY p2.id LIMIT 1)
+      LEFT JOIN source_file sf ON sf.id = pg.file_id
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+      ORDER BY c.source_page`).all(p.id).map((r) => {
+        const fn = r.file_path ? String(r.file_path).split(/[\\/]/).pop() : '';
+        const m = fn.match(/第[一二三四五六七八九十0-9]+[章节]/);
+        const fallback = fn.replace(/\.[^.]+$/, '').replace(/^[0-9０-９]+[-\s._、]*/, '').trim();
+        return { ...r, ch: r.ch || (m ? m[0] : fallback) || '未分章' };
+      });
+    const courseName = c ? c.name : '课程';
+    if (fmt === 'csv') {
+      const q = (s) => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+      const head = ['章节', '页码', '术语', '星级', '释义'].map(q).join(',');
+      const body = rows.map((r) => [
+        r.ch, r.source_page, r.front, r.importance, String(r.back || '').replace(/\n/g, ' '),
+      ].map(q).join(','));
+      return {
+        filename: `${courseName}-卡片.csv`,
+        mime: 'text/csv',
+        text: '\ufeff' + [head, ...body].join('\n'),
+      };
+    }
+    let md = `# ${courseName} · 知识卡\n\n`;
+    let lastCh = '';
+    for (const r of rows) {
+      if (r.ch !== lastCh) { md += `\n## ${r.ch}\n\n`; lastCh = r.ch; }
+      const star = '★'.repeat(Number(r.importance) || 3);
+      md += `- **${r.front}**（${star}，第 ${r.source_page} 页）\n  ${String(r.back || '').replace(/\n/g, ' ')}\n`;
+    }
+    return { filename: `${courseName}-卡片.md`, mime: 'text/markdown', text: md };
   },
 
   // ---- 考试模式：定考试日期，倒推每天要刷多少 ----

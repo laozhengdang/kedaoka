@@ -1,4 +1,4 @@
-// preload.cjs —— 只把需要的方法交给前端，不暴露 Node
+﻿// preload.cjs —— 只把需要的方法交给前端，不暴露 Node
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('nativeApi', {
@@ -15,5 +15,7 @@ contextBridge.exposeInMainWorld('nativeApi', {
   pickImage: () => ipcRenderer.invoke('pick-image'),
   importBackground: (p) => ipcRenderer.invoke('import-background', p),
   readText: (p) => ipcRenderer.invoke('read-text', p),
+  saveText: (filename, text) => ipcRenderer.invoke('save-text', { filename, text }),
+  backupDb: () => ipcRenderer.invoke('backup-db'),
   isDesktop: true,
 });

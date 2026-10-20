@@ -1,4 +1,4 @@
-// app.js —— 前端（原生 JS，无构建）
+﻿// app.js —— 前端（原生 JS，无构建）
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, html) => {
@@ -526,7 +526,10 @@ function showSplash(profile) {
   const seed = new Date().toISOString().slice(0, 10);
   let h = 0;
   for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) % 997;
-  const q = (profile && profile.quote) ? profile.quote.split('——')[0].trim() : quotes[h % quotes.length];
+  const custom = Array.isArray(profile && profile.quotes) ? profile.quotes.filter(Boolean) : [];
+  const oneLine = (profile && profile.quote) ? profile.quote.split('——')[0].trim() : '';
+  const pool = custom.length ? custom : (oneLine ? [oneLine] : quotes);
+  const q = pool[h % pool.length];
   $('#splashQuote').textContent = q;
   box.classList.remove('hidden');
   let done = false;
@@ -664,9 +667,10 @@ async function pickImportFile() {
   }
   const files = await window.nativeApi.pickFiles();
   if (!files || !files.length) return;
+  STATE.importQueue = files;
   $('#importPath').value = files[0];
-  $('#importPicked').textContent = files.length > 1 ? `已选 ${files.length} 个（先导入第 1 个）` : '';
-  if (files.length > 1) toast(`选了 ${files.length} 个，当前只导入第一个`);
+  $('#importPicked').textContent = files.length > 1 ? `已选 ${files.length} 个，会依次导入` : '';
+  if (files.length > 1) toast(`选了 ${files.length} 个，点「开始导入」会一个一个来`);
   probeFile(files[0]);
 }
 
@@ -737,11 +741,12 @@ async function intakeDropped(files) {
       return;
     }
   }
+  STATE.importQueue = paths;
   $('#importPath').value = paths[0];
-  $('#importPicked').textContent = paths.length > 1 ? `还有 ${paths.length - 1} 个待导入` : '';
+  $('#importPicked').textContent = paths.length > 1 ? `收到 ${paths.length} 个，会依次导入` : '';
   log.textContent = `已接收：\n${paths.join('\n')}\n点「开始导入」继续。`;
   probeFile(paths[0]);
-  if (paths.length > 1) toast(`收到 ${paths.length} 个文件，先导入第一个`);
+  if (paths.length > 1) toast(`收到 ${paths.length} 个文件，点「开始导入」会一个一个来`);
 }
 
 // ---------- 新建学科 ----------
@@ -1083,7 +1088,7 @@ function renderCard() {
       <div class="meta">${c.chapter ? esc(c.chapter) + ' · ' : ''}第 ${c.source_page} 页 · ${stars(c.importance)}</div>
       <div class="answer"><div class="label">课件原文</div>${esc(c.back || '（这一页没有抽到上下文）')}</div>
       <div id="revDia"></div>
-      ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" alt="配图" loading="lazy"></div>` : ''}
+      ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" data-card-id="${c.id}" alt="配图" loading="lazy"></div>` : ''}
       <div class="row" style="justify-content:center;margin-top:26px">
         <button class="primary" id="btnNext">下一张 <span class="kbd">空格</span></button>
       </div>`;
@@ -2327,7 +2332,7 @@ async function viewCard(id) {
         <button id="btnAttachDia" class="ghost small">＋ 给这张卡挂一张机制图</button>
         <div id="diaPickList" class="hidden" style="margin-top:8px"></div>
       </div>
-      ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" alt="配图" loading="lazy"></div>` : ''}
+      ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" data-card-id="${c.id}" alt="配图" loading="lazy"></div>` : ''}
       ${d.samePage.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">同一页的其他概念</div>
         ${d.samePage.map((x) => `<a data-go="${x.id}">${esc(x.front)}</a>`).join(' · ')}</div>` : ''}
       ${d.relations.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">相关概念</div>
@@ -2477,6 +2482,11 @@ async function viewSettings() {
         <input id="pQuote" value="${esc(p.quote || '')}" placeholder="留空则不显示（可用「正文 —— 出处」）">
       </div>
       <p class="hint">写在首页顶上，给自己打气用。</p>
+      <div style="margin-top:14px">
+        <label class="sub">启动名言库（每行一条，启动时随机挑一条）</label>
+        <textarea id="pQuotes" style="width:100%;height:110px;margin-top:6px;font-size:13px"
+          placeholder="一天一个概念&#10;背不下来就先看懂一遍">${esc((p.quotes || []).join('\n'))}</textarea>
+      </div>
     </div>
     <h2>计时器</h2>
     <div class="detail">
@@ -2502,7 +2512,8 @@ async function viewSettings() {
       <label><input type="checkbox" id="pWeek" ${p.show_week ? 'checked' : ''}> 显示周视图</label><br>
       <label><input type="checkbox" id="pProg" ${p.show_progress ? 'checked' : ''}> 显示总进度</label><br>
       <label><input type="checkbox" id="pStreak" ${p.show_streak ? 'checked' : ''}> 显示连续天数</label><br>
-      <label><input type="checkbox" id="pSplash" ${p.splash ? 'checked' : ''}> 启动画面</label>
+      <label><input type="checkbox" id="pSplash" ${p.splash ? 'checked' : ''}> 启动画面</label><br>
+      <label><input type="checkbox" id="pShuffle" ${p.shuffle ? 'checked' : ''}> 复习乱序（每天打散顺序）</label>
     </div>
     <div class="row" style="margin-top:16px">
       <button id="pSave" class="primary">保存</button>
@@ -2520,6 +2531,19 @@ async function viewSettings() {
         <pre id="advOut" class="log hidden"></pre>
       </div>
     </details>
+    <h2>导出</h2>
+    <div class="detail">
+      <p class="hint">把卡片导成文件：Markdown 方便打印/贴到别处，CSV 能进 Excel。</p>
+      <div class="row" style="margin-top:8px">
+        <select id="expCourse" class="tool-select" style="max-width:260px"></select>
+        <button id="expMd" class="small">导出 Markdown</button>
+        <button id="expCsv" class="small">导出 CSV</button>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button id="expBackup" class="ghost small">备份数据库（.db）</button>
+      </div>
+      <pre id="expOut" class="log hidden"></pre>
+    </div>
     <h2>关于</h2>
     <div class="detail">
       <div class="row"><button id="btnAbout" class="small">版本与说明</button></div>
@@ -2532,6 +2556,29 @@ async function viewSettings() {
     for (const c of bb.courses) await api('POST', `/api/queue/clear/${c.id}`, {});
     toast('今天的队列已清空，下次进课程会重新排');
   };
+  // 导出面板
+  const expSel = $('#expCourse');
+  if (expSel) {
+    expSel.innerHTML = STATE.courses.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+    const doExport = async (format) => {
+      const cid = expSel.value;
+      if (!cid) return toast('先选一门课');
+      try {
+        const r = await api('GET', `/api/export/cards/${cid}?format=${format}`);
+        if (!window.nativeApi || !window.nativeApi.saveText) return toast('网页版不支持保存文件');
+        const out = await window.nativeApi.saveText(r.filename, r.text);
+        if (out.ok) toast('已保存：' + out.path);
+      } catch (e) { toast('导出失败：' + (e.message || e)); }
+    };
+    $('#expMd').onclick = () => doExport('md');
+    $('#expCsv').onclick = () => doExport('csv');
+    $('#expBackup').onclick = async () => {
+      if (!window.nativeApi || !window.nativeApi.backupDb) return toast('网页版不支持备份');
+      const r = await window.nativeApi.backupDb();
+      if (r.ok) toast('已备份：' + r.path);
+    };
+  }
+
   const sc = $('#advSelfCheck');
   if (sc) sc.onclick = async () => {
     const out = $('#advOut');
@@ -2550,8 +2597,10 @@ async function viewSettings() {
       show_progress: $('#pProg').checked,
       show_streak: $('#pStreak').checked,
       splash: $('#pSplash').checked,
+      shuffle: $('#pShuffle').checked,
       theme: STATE.profile.theme || 'paper',
       quote: $('#pQuote').value.trim(),
+      quotes: ($('#pQuotes').value || '').split('\n').map((s) => s.trim()).filter(Boolean),
       card_timer: $('#pTimer').checked,
       card_timer_sec: Number($('#pTimerSec').value) || 90,
     });
@@ -2895,54 +2944,82 @@ function openImport(courseName) {
   inp.focus();
 }
 async function doImport() {
-  const file = $('#importPath').value.trim();
+  const typed = $('#importPath').value.trim();
   const courseName = $('#importCourse').value.trim();
-  if (!file || !courseName) return toast('路径和课程名都要填');
+  const queue = (STATE.importQueue && STATE.importQueue.length) ? [...STATE.importQueue] : (typed ? [typed] : []);
+  if (!queue.length || !courseName) return toast('路径和课程名都要填');
   const kind = document.querySelector('input[name="kind"]:checked')?.value || 'theory';
   const docType = $('#importDocType') ? $('#importDocType').value : 'ppt';
+  const typeLabel = ({ ppt: '授课课件', exam: '题库真题', notes: '复习资料', syllabus: '考纲提纲' })[docType] || '授课课件';
+
   $('#importGo').disabled = true;
-  $('#importLog').textContent = `解析中…（${kind === 'lab' ? '实验课' : '理论课'} · ${({ppt:'授课课件',exam:'题库真题',notes:'复习资料',syllabus:'考纲提纲'})[docType] || '授课课件'}，无 AI，纯本地）`;
-  const { job } = await api('POST', '/api/import', { file, courseName, kind, docType });
-  const poll = setInterval(async () => {
-    const j = await api('GET', `/api/job/${job}`);
-    // 三段进度：读页 → 写卡 → 建关系（从日志里的标记推断）
-    const log = j.log || '';
-    const pageM = [...log.matchAll(/\[page\] (\d+)\/(\d+)/g)].pop();
-    let pct = 8;
-    let stage = '读页';
-    if (pageM) {
-      pct = 8 + Math.min(60, Math.round((Number(pageM[1]) / Number(pageM[2])) * 60));
-      stage = `读页 ${pageM[1]}/${pageM[2]}`;
-    }
-    if (log.includes('[stage] cards')) { pct = Math.max(pct, 72); stage = '写卡片'; }
-    if (log.includes('[stage] relations')) { pct = Math.max(pct, 90); stage = '建关系'; }
-    if (j.status === 'done') { pct = 100; stage = '完成'; }
-    const bar = $('#importBar');
-    if (bar) bar.style.width = pct + '%';
-    const st = $('#importStage');
-    if (st) st.textContent = stage;
-    const clean = log.split('\n').filter((l) => l && !l.startsWith('[')).join('\n');
-    $('#importLog').textContent = clean || '…';
-    if (j.status !== 'running') {
-      clearInterval(poll);
-      $('#importGo').disabled = false;
-      if (j.status === 'done') {
-        const b = await api('GET', '/api/bootstrap');
-        STATE.courses = b.courses;
-        renderSidebar();
-        $('#importModal').classList.add('hidden');
-        askRefineAfterImport(courseName);
-      } else {
-        const tail = (j.log || '').split('\n').filter(Boolean).slice(-3).join(' ');
-        if (/文件不存在/.test(j.log || '')) {
-          toast('找不到这个文件，点「选择文件」重新选一次');
-          $('#importLog').textContent = (j.log || '') + '\n\n提示：手动输入的路径可能不完整，请用「选择文件」按钮。';
-        } else {
-          toast('导入失败：' + (tail || '看日志'));
+  const total = queue.length;
+  let doneCount = 0;
+  const failed = [];
+
+  for (let qi = 0; qi < queue.length; qi += 1) {
+    const file = queue[qi];
+    const shortName = file.split(/[\\/]/).pop();
+    const head = total > 1 ? `（${qi + 1}/${total}）${shortName}\n` : '';
+    $('#importLog').textContent = `${head}解析中…（${kind === 'lab' ? '实验课' : '理论课'} · ${typeLabel}，无 AI，纯本地）`;
+
+    // eslint-disable-next-line no-await-in-loop
+    const { job } = await api('POST', '/api/import', { file, courseName, kind, docType });
+    // eslint-disable-next-line no-await-in-loop
+    const result = await new Promise((resolve) => {
+      const poll = setInterval(async () => {
+        const j = await api('GET', `/api/job/${job}`);
+        const log = j.log || '';
+        const pageM = [...log.matchAll(/\[page\] (\d+)\/(\d+)/g)].pop();
+        let pct = 8;
+        let stage = '读页';
+        if (pageM) {
+          pct = 8 + Math.min(60, Math.round((Number(pageM[1]) / Number(pageM[2])) * 60));
+          stage = `读页 ${pageM[1]}/${pageM[2]}`;
         }
+        if (log.includes('[stage] cards')) { pct = Math.max(pct, 72); stage = '写卡片'; }
+        if (log.includes('[stage] relations')) { pct = Math.max(pct, 90); stage = '建关系'; }
+        if (j.status === 'done') { pct = 100; stage = '完成'; }
+        const bar = $('#importBar');
+        if (bar) bar.style.width = Math.round(((qi + pct / 100) / total) * 100) + '%';
+        const st = $('#importStage');
+        if (st) st.textContent = total > 1 ? `第 ${qi + 1}/${total} 个 · ${stage}` : stage;
+        const clean = log.split('\n').filter((l) => l && !l.startsWith('[')).join('\n');
+        $('#importLog').textContent = head + (clean || '…');
+        if (j.status !== 'running') {
+          clearInterval(poll);
+          resolve(j);
+        }
+      }, 700);
+    });
+
+    if (result.status === 'done') {
+      doneCount += 1;
+    } else {
+      failed.push(shortName);
+      const tail = (result.log || '').split('\n').filter(Boolean).slice(-2).join(' ');
+      if (/文件不存在/.test(result.log || '')) {
+        $('#importLog').textContent = `${head}找不到这个文件。手动输入的路径可能不完整，请用「选择文件」。`;
+      } else {
+        $('#importLog').textContent = `${head}失败：${tail}`;
       }
     }
-  }, 700);
+  }
+
+  $('#importGo').disabled = false;
+  STATE.importQueue = null;
+  const b = await api('GET', '/api/bootstrap');
+  STATE.courses = b.courses;
+  renderSidebar();
+
+  if (!failed.length) {
+    $('#importModal').classList.add('hidden');
+    toast(total > 1 ? `${total} 份课件都导进来了` : '导入完成');
+    askRefineAfterImport(courseName);
+  } else {
+    toast(`${doneCount} 份成功，${failed.length} 份失败`);
+    $('#importStage').textContent = '有文件失败';
+  }
 }
 
 function esc(s) {
@@ -2963,12 +3040,94 @@ function stars(n) {
   return `<span class="stars">${'★'.repeat(k)}<span class="dim">${'☆'.repeat(5 - k)}</span></span>`;
 }
 
-// 点图放大（最小版图片查看器，完整版见文档 24.7）
+// 图片查看器：滚轮缩放、拖动平移、←/→ 翻到上一张/下一张
 document.addEventListener('click', (e) => {
   if (e.target.tagName === 'IMG' && e.target.closest('.cardimg')) {
-    e.target.classList.toggle('zoomed');
+    openImageViewer(e.target.dataset.cardId || '', e.target.src);
   }
 });
+
+function openImageViewer(cardId, src) {
+  const box = el('div', 'imgview');
+  box.innerHTML = `
+    <div class="imgview-bar">
+      <span class="imgview-title" id="ivTitle"></span>
+      <span class="imgview-ops">
+        <button id="ivZoomOut" class="ghost small">－</button>
+        <button id="ivZoomIn" class="ghost small">＋</button>
+        <button id="ivReset" class="ghost small">复位</button>
+        <button id="ivClose" class="ghost small">关闭</button>
+      </span>
+    </div>
+    <div class="imgview-stage" id="ivStage">
+      <img id="ivImg" src="${src}" alt="">
+    </div>
+    <div class="imgview-foot" id="ivFoot"></div>`;
+  document.body.appendChild(box);
+
+  let scale = 1;
+  let tx = 0;
+  let ty = 0;
+  let dragging = false;
+  let sx = 0;
+  let sy = 0;
+  const img = box.querySelector('#ivImg');
+  const stage = box.querySelector('#ivStage');
+
+  const apply = () => {
+    img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    img.style.cursor = dragging ? 'grabbing' : 'grab';
+  };
+  const reset = () => { scale = 1; tx = 0; ty = 0; apply(); };
+
+  box.querySelector('#ivZoomIn').onclick = () => { scale = Math.min(6, scale * 1.25); apply(); };
+  box.querySelector('#ivZoomOut').onclick = () => { scale = Math.max(0.3, scale / 1.25); apply(); };
+  box.querySelector('#ivReset').onclick = reset;
+  box.querySelector('#ivClose').onclick = () => { window.removeEventListener('keydown', key); box.remove(); };
+
+  stage.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const k = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    scale = Math.max(0.3, Math.min(6, scale * k));
+    apply();
+  }, { passive: false });
+
+  img.addEventListener('mousedown', (e) => {
+    dragging = true; sx = e.clientX - tx; sy = e.clientY - ty; apply();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    tx = e.clientX - sx; ty = e.clientY - sy; apply();
+  });
+  window.addEventListener('mouseup', () => { dragging = false; apply(); });
+
+  // 翻页：同一门课里带图的卡
+  let nav = null;
+  const load = async (id) => {
+    nav = await api('GET', `/api/card/${id}/images`);
+    img.src = imgUrl(nav.current);
+    box.querySelector('#ivTitle').textContent =
+      `${box.querySelector('#ivTitle').dataset.name || ''}（第 ${nav.index + 1}/${nav.total} 张）`;
+    box.querySelector('#ivFoot').innerHTML =
+      `${nav.prev ? `<a id="ivPrev">← 上一张 ${esc(nav.prev.front)}</a>` : '<span class="sub">已经是最前</span>'}
+       <span style="flex:1"></span>
+       ${nav.next ? `<a id="ivNext">下一张 ${esc(nav.next.front)} →</a>` : '<span class="sub">已经是最后</span>'}`;
+    const p = box.querySelector('#ivPrev');
+    const n = box.querySelector('#ivNext');
+    if (p) p.onclick = () => load(nav.prev.id);
+    if (n) n.onclick = () => load(nav.next.id);
+    reset();
+  };
+
+  const key = (e) => {
+    if (e.key === 'Escape') { box.remove(); window.removeEventListener('keydown', key); return; }
+    if (e.key === 'ArrowLeft' && nav && nav.prev) load(nav.prev.id);
+    if (e.key === 'ArrowRight' && nav && nav.next) load(nav.next.id);
+  };
+  window.addEventListener('keydown', key);
+
+  if (cardId) load(cardId); else reset();
+}
 
 // 图片加载失败（文件被删/路径失效）就把那块收起来，别留个破图
 document.addEventListener('error', (e) => {

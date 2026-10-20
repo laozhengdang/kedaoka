@@ -1,4 +1,4 @@
-﻿// main.mjs —— 桌面版入口（Electron）
+// main.mjs —— 桌面版入口（Electron）
 // 不开本地端口、不经过浏览器：直接用 IPC 调 api.mjs，前端加载本地文件。
 
 import { app, BrowserWindow, ipcMain, shell, Menu } from 'electron';
@@ -60,6 +60,32 @@ ipcMain.handle('open-external', async (_e, url) => {
 
 // 把库里的相对图片路径变成能直接放进 <img src> 的 file:// 地址
 ipcMain.handle('data-dir', async () => process.env.MIAOMIAO_DATA || '.');
+
+// 保存文本到用户选的位置（导出用）
+ipcMain.handle('save-text', async (_e, { filename, text } = {}) => {
+  const { dialog } = await import('electron');
+  const { writeFileSync } = await import('node:fs');
+  const r = await dialog.showSaveDialog(win || undefined, { defaultPath: filename || 'export.txt' });
+  if (r.canceled || !r.filePath) return { ok: false };
+  writeFileSync(r.filePath, String(text ?? ''), 'utf8');
+  return { ok: true, path: r.filePath };
+});
+
+// 备份数据库：先 checkpoint 再复制一份
+ipcMain.handle('backup-db', async () => {
+  const { dialog } = await import('electron');
+  const { copyFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const src = join(process.env.MIAOMIAO_DATA || '.', 'db', 'app.db');
+  const stamp = new Date().toISOString().slice(0, 10);
+  const r = await dialog.showSaveDialog(win || undefined, {
+    defaultPath: `妙妙小工具-备份-${stamp}.db`,
+    filters: [{ name: '数据库', extensions: ['db'] }],
+  });
+  if (r.canceled || !r.filePath) return { ok: false };
+  copyFileSync(src, r.filePath);
+  return { ok: true, path: r.filePath };
+});
 
 // 读取文本文件（导入 .drawio 用）
 ipcMain.handle('read-text', async (_e, p) => {
