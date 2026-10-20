@@ -397,6 +397,14 @@ const handlers = {
     db.prepare(`DELETE FROM daily_queue WHERE card_id IN (SELECT id FROM card WHERE file_id=?)`).run(p.id);
     return { ok: true, archived: n };
   },
+  // 局部重跑：删掉这一批的卡，按同样的文件重解析一遍
+  'POST /api/batch/:id/reparse': (p) => {
+    const f = db.prepare('SELECT * FROM source_file WHERE id=?').get(p.id);
+    if (!f) throw new Error('这一批不存在');
+    const c = db.prepare('SELECT name FROM course WHERE id=?').get(f.course_id);
+    const job = startImport(f.path, c.name, f.kind || 'theory', f.doc_type || 'ppt', true);
+    return { ok: true, job };
+  },
   'POST /api/batch/:id/restore': (p) => {
     const f = db.prepare('SELECT id FROM source_file WHERE id=?').get(p.id);
     if (!f) throw new Error('这一批不存在');
@@ -928,10 +936,33 @@ const handlers = {
       WHERE c.course_id=? AND c.status='active' AND c.is_title=0
         AND s.due_at IS NOT NULL AND substr(s.due_at,1,10)=?`).get(p.id, tomorrow).n;
 
+    // 连续学习天数（含今天，往回数）
+    let streak = 0;
+    for (let k = 0; k < 365; k += 1) {
+      const d = new Date(Date.now() - k * 86400000).toISOString().slice(0, 10);
+      const n = db.prepare(`
+        SELECT COUNT(*) n FROM review_log l JOIN card c ON c.id=l.card_id
+        WHERE c.course_id=? AND substr(l.ts,1,10)=?`).get(p.id, d).n;
+      if (n > 0) streak += 1;
+      else if (k > 0) break;
+    }
+
     return {
       dist, total: Object.values(dist).reduce((a, b) => a + b, 0),
-      date, graduatedToday, dueTomorrow,
+      date, graduatedToday, dueTomorrow, streak,
     };
+  },
+
+  // 高级：清空今天的队列
+  'POST /api/queue/clear/:id': (p) => {
+    const n = db.prepare('DELETE FROM daily_queue WHERE course_id=? AND date=?').run(p.id, today()).changes;
+    return { ok: true, removed: n };
+  },
+  // 高级：设置页里跑自检
+  'POST /api/selfcheck': async () => {
+    const { runSelfCheck } = await import('../tools/selfcheck.mjs');
+    const lines = await runSelfCheck(process.env.MIAOMIAO_DATA || '');
+    return { lines };
   },
 
   'GET /api/settings': () => ({ profile: getProfile() }),
@@ -1096,12 +1127,13 @@ function pythonExe() {
 
 const jobs = new Map();
 
-export function startImport(filePath, courseName, kind = 'theory', docType = 'ppt') {
+export function startImport(filePath, courseName, kind = 'theory', docType = 'ppt', reparse = false) {
   const id = uid('job_');
   const job = { id, status: 'running', log: '', result: null };
   jobs.set(id, job);
   const py = spawn(pythonExe(), [join(ROOT, 'tools', 'ingest.py'),
-    '--file', filePath, '--course-name', courseName, '--kind', kind, '--doc-type', docType], {
+    '--file', filePath, '--course-name', courseName, '--kind', kind, '--doc-type', docType,
+    ...(reparse ? ['--reparse'] : [])], {
     cwd: ROOT, env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
   });
   py.stdout.on('data', (d) => { job.log += d.toString(); });

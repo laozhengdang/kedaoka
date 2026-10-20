@@ -68,13 +68,26 @@ function renderSidebar() {
 }
 
 // ---------------- 第一栏：工具 ----------------
-const FOCUS = { running: false, t0: 0, acc: 0, milestones: [], full: false };
+const FOCUS = { running: false, t0: 0, acc: 0, milestones: [], full: false, minutes: 0 };
 
-// 时钟绘制（工具区小钟 + 专注界面大钟一起刷）
+// 时钟绘制（工具区小钟 + 专注界面大钟一起刷；倒计时模式下显示剩余）
 function paintClockGlobal() {
-  const ms = FOCUS.acc + (FOCUS.running ? Date.now() - FOCUS.t0 : 0);
-  const s = Math.floor(ms / 1000);
-  const label = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const elapsed = FOCUS.acc + (FOCUS.running ? Date.now() - FOCUS.t0 : 0);
+  let label;
+  if (FOCUS.minutes) {
+    const left = Math.max(0, FOCUS.minutes * 60000 - elapsed);
+    const s = Math.ceil(left / 1000);
+    label = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    if (left === 0 && FOCUS.running) {
+      FOCUS.running = false;
+      FOCUS.acc = elapsed;
+      const m = $('#focusMsg');
+      if (m) { m.textContent = '时间到了。这一轮结束，起来走两步。'; m.classList.add('hit'); }
+    }
+  } else {
+    const s = Math.floor(elapsed / 1000);
+    label = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  }
   const text = $('#timerText');
   if (text) text.textContent = label;
   const big = $('#focusClock');
@@ -82,7 +95,11 @@ function paintClockGlobal() {
   const btn = $('#btnTimer');
   if (btn) btn.classList.toggle('running', FOCUS.running);
   const hint = $('#timerHint');
-  if (hint) hint.textContent = FOCUS.running ? '计时中 · 再次点开可暂停' : '点一下进入专注计时';
+  if (hint) {
+    hint.textContent = FOCUS.minutes
+      ? `倒计时 ${FOCUS.minutes} 分钟 · 点一下${FOCUS.running ? '暂停' : '继续'}`
+      : (FOCUS.running ? '计时中 · 再次点开可暂停' : '点一下进入专注计时');
+  }
 }
 
 function bindTools() {
@@ -121,6 +138,23 @@ function bindTools() {
   bindFocus();
   bindThemeModal();
   bindNewProf();
+  document.querySelectorAll('#focusPresets [data-m]').forEach((b) => {
+    b.onclick = () => {
+      const m = Number(b.dataset.m);
+      FOCUS.minutes = m;
+      FOCUS.acc = 0;
+      FOCUS.t0 = Date.now();
+      FOCUS.running = m > 0;
+      FOCUS.milestones = [];
+      document.querySelectorAll('#focusPresets [data-m]').forEach((x) => x.classList.toggle('primary', x === b));
+      const msg = $('#focusMsg');
+      if (msg) {
+        msg.textContent = m > 0 ? `倒计时 ${m} 分钟，开始` : '已切回正计时';
+        msg.classList.remove('hit');
+      }
+      paintClockGlobal();
+    };
+  });
   if (!window.__toolsTicked) {
     window.__toolsTicked = true;
     setInterval(() => { if (FOCUS.running) paintClockGlobal(); }, 500);
@@ -1838,6 +1872,12 @@ async function viewBatches(courseId) {
     const docLabel = { ppt: '授课课件', exam: '题库真题', notes: '复习资料', syllabus: '考纲提纲' }[b.doc_type] || '授课课件';
     row.innerHTML = `<span class="t">${esc(b.fileName)}</span>
       <span class="pg">${docLabel} · ${b.kind === 'lab' ? '实验课' : '理论课'} · ${b.pages} 页 · ${b.cards} 张卡${b.active ? '' : ' · 已移除'}</span>`;
+    const redo = el('button', 'ghost small', '重跑');
+    redo.onclick = async () => {
+      if (!confirm(`重跑会删掉这一批现有的卡，按原文件重新解析一遍。继续？`)) return;
+      await api('POST', `/api/batch/${b.id}/reparse`, {});
+      toast('已开始重跑，几分钟后回来看');
+    };
     const btn = el('button', b.active ? 'ghost small' : 'small', b.active ? '移除' : '恢复');
     btn.onclick = async () => {
       if (b.active) {
@@ -1855,6 +1895,7 @@ async function viewBatches(courseId) {
     };
     const box = el('span');
     box.style.marginLeft = 'auto';
+    box.appendChild(redo);
     box.appendChild(btn);
     row.appendChild(box);
     list.appendChild(row);
@@ -1987,6 +2028,7 @@ async function viewSummary(id) {
       <div>模糊 <b>${dist[3] || 0}</b></div>
       <div>完全不记得 <b>${dist[4] || 0}</b></div>
       <div class="sub" style="margin-top:12px">明天到期复习 <b>${s.dueTomorrow || 0}</b> 张</div>
+      ${(s.streak || 0) >= 7 ? `<div class="streak-badge">连续第 <b>${s.streak}</b> 天，稳得很</div>` : ""}
     </div>
     ${(s.graduatedToday && s.graduatedToday.length)
     ? `<h2 style="margin-top:22px">今天标了「以后不用再考」的 ${s.graduatedToday.length} 张</h2>
@@ -2126,6 +2168,7 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '',
     </div>
     <div class="row" style="margin-bottom:8px">
       <button class="small ${view === 'chapter' ? 'primary' : ''}" data-v="chapter">按章节</button>
+      <button class="small ${view === 'section' ? 'primary' : ''}" data-v="section">按小节</button>
       <button class="small ${view === 'page' ? 'primary' : ''}" data-v="page">按页码</button>
       <button class="small ${view === 'star' ? 'primary' : ''}" data-v="star">按重要度</button>
       <button class="small ${view === 'az' ? 'primary' : ''}" data-v="az">A→Z</button>
@@ -2149,7 +2192,27 @@ async function viewBrowse(id, q = '', filter = 'all', silent = false, kind = '',
 
   const list = w.querySelector('#list');
   const groups = d.groups || {};
-  if (view === 'chapter') {
+  if (view === 'section') {
+    // 章节内按页码断档切小节：相邻两张卡隔 >3 页就算新的一节
+    const sorted = [...d.cards].sort((a, b) => Number(a.source_page) - Number(b.source_page));
+    const groups = [];
+    let cur = null;
+    let prevPage = null;
+    let prevCh = null;
+    for (const c of sorted) {
+      const ch = c.chapter || '未分章';
+      const page = Number(c.source_page) || 0;
+      const isNew = !cur || ch !== prevCh || (prevPage !== null && page - prevPage > 3);
+      if (isNew) { cur = { ch, startPage: page, rows: [] }; groups.push(cur); }
+      cur.rows.push(c);
+      prevPage = page;
+      prevCh = ch;
+    }
+    for (const g of groups) {
+      list.appendChild(el('div', 'group-title', `${g.ch} · 第 ${g.startPage} 页起（${g.rows.length} 张）`));
+      for (const c of g.rows) list.appendChild(browseRow(c));
+    }
+  } else if (view === 'chapter') {
     const byCh = new Map();
     for (const c of d.cards) {
       const k = c.chapter || '未分章';
@@ -2401,11 +2464,42 @@ async function viewSettings() {
     <div class="row" style="margin-top:16px">
       <button id="pSave" class="primary">保存</button>
     </div>
+    <details class="adv-box">
+      <summary>高级（谨慎操作）</summary>
+      <div class="detail">
+        <p class="hint">这些操作会直接影响数据，用完最好跑一次自检。</p>
+        <div class="row" style="margin-top:8px">
+          <button id="advClearQueue" class="ghost small">清空今天的队列（不动卡片与记录）</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="advSelfCheck" class="ghost small">跑一次数据自检</button>
+        </div>
+        <pre id="advOut" class="log hidden"></pre>
+      </div>
+    </details>
     <h2>关于</h2>
     <div class="detail">
       <div class="row"><button id="btnAbout" class="small">版本与说明</button></div>
     </div>`;
-  m.appendChild(w);  $('#btnAbout').onclick = () => showAbout();  $('#pSave').onclick = async () => {
+  m.appendChild(w);  $('#btnAbout').onclick = () => showAbout();
+  const aq = $('#advClearQueue');
+  if (aq) aq.onclick = async () => {
+    if (!confirm('清空今天所有课程的队列？卡片和复习记录都会保留。')) return;
+    const bb = await api('GET', '/api/bootstrap');
+    for (const c of bb.courses) await api('POST', `/api/queue/clear/${c.id}`, {});
+    toast('今天的队列已清空，下次进课程会重新排');
+  };
+  const sc = $('#advSelfCheck');
+  if (sc) sc.onclick = async () => {
+    const out = $('#advOut');
+    out.classList.remove('hidden');
+    out.textContent = '自检中…';
+    try {
+      const r = await api('POST', '/api/selfcheck', {});
+      out.textContent = (r.lines || []).join('\n');
+    } catch (e) { out.textContent = '自检失败：' + (e.message || e); }
+  };
+  $('#pSave').onclick = async () => {
     await api('POST', '/api/settings', {
       daily_new_max: Number($('#pNew').value) || 10,
       daily_review_max: Number($('#pRev').value) || 5,
@@ -2755,7 +2849,24 @@ async function doImport() {
   const { job } = await api('POST', '/api/import', { file, courseName, kind, docType });
   const poll = setInterval(async () => {
     const j = await api('GET', `/api/job/${job}`);
-    $('#importLog').textContent = j.log || '…';
+    // 三段进度：读页 → 写卡 → 建关系（从日志里的标记推断）
+    const log = j.log || '';
+    const pageM = [...log.matchAll(/\[page\] (\d+)\/(\d+)/g)].pop();
+    let pct = 8;
+    let stage = '读页';
+    if (pageM) {
+      pct = 8 + Math.min(60, Math.round((Number(pageM[1]) / Number(pageM[2])) * 60));
+      stage = `读页 ${pageM[1]}/${pageM[2]}`;
+    }
+    if (log.includes('[stage] cards')) { pct = Math.max(pct, 72); stage = '写卡片'; }
+    if (log.includes('[stage] relations')) { pct = Math.max(pct, 90); stage = '建关系'; }
+    if (j.status === 'done') { pct = 100; stage = '完成'; }
+    const bar = $('#importBar');
+    if (bar) bar.style.width = pct + '%';
+    const st = $('#importStage');
+    if (st) st.textContent = stage;
+    const clean = log.split('\n').filter((l) => l && !l.startsWith('[')).join('\n');
+    $('#importLog').textContent = clean || '…';
     if (j.status !== 'running') {
       clearInterval(poll);
       $('#importGo').disabled = false;

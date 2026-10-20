@@ -513,3 +513,19 @@ html[data-theme="dark"] .exam-row-body { color: #c9c9c4; }
 .wiz-steps { display: flex; gap: 10px; margin-bottom: 16px; font-size: 12px; color: var(--muted); }
 .wiz-steps span { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); }
 .wiz-steps span.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* 连续天数徽章 */
+.streak-badge {
+  margin-top: 10px; padding: 8px 12px; border-radius: 8px;
+  background: #fff6df; border: 1px solid #f0d79a; color: #8a5a00;
+  font-size: 13px; text-align: center;
+}
+html[data-theme="dark"] .streak-badge { background: #3a2f14; border-color: #6b5726; color: #f0d79a; }
+
+/* 专注界面倒计时预设 */
+.focus-presets { margin-top: 18px; display: flex; gap: 8px; justify-content: center; align-items: center; }
+.focus-mini {
+  padding: 5px 12px; border-radius: 999px; font: inherit; font-size: 12px;
+  border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer;
+}
+.focus-mini.primary { border-color: var(--accent); color: var(--accent); }

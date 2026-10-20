@@ -428,6 +428,8 @@ def main():
         if imgs:
             page_images[pno + 1] = imgs[0][0]
         page_main_term[pno + 1] = pick_main_term(page)
+        if (pno + 1) % 10 == 0:
+            print(f"[page] {{}}/{{}}".format(pno + 1, len(doc)), flush=True)
         ch = detect_chapter(lines)
         if ch:
             current_chapter = ch
@@ -568,6 +570,7 @@ def main():
         found[t] = {"pages": {pno}, "color": 0x000000, "first_page": pno, "is_title": True}
 
     # 3) 概念 + 卡片
+    print("[stage] cards", flush=True)
     created = 0
     for term, info in found.items():
         row = conn.execute(
@@ -601,6 +604,7 @@ def main():
                      (card_id, "new", now()))
         created += 1
 
+    print("[stage] relations", flush=True)
     # 4) 关系：从"X 包括/分为 A、B、C"这类句式抽包含关系
     rel_count = build_relations(conn, course_id, page_cache, page_main_term)
 

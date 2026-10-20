@@ -107,6 +107,10 @@
       <button id="importGo" class="primary">开始导入</button>
       <button id="importClose" class="ghost">关闭</button>
     </div>
+    <div class="row" style="align-items:center;gap:10px;margin-top:10px">
+      <div class="bar" style="flex:1"><i id="importBar" style="width:0%"></i></div>
+      <span class="sub" id="importStage">准备</span>
+    </div>
     <pre id="importLog" class="log"></pre>
   </div>
 </div>
@@ -119,6 +123,13 @@
     <div class="focus-btns">
       <button id="focusToggle" class="focus-btn primary">开始</button>
       <button id="focusExit" class="focus-btn">退出专注</button>
+    </div>
+    <div class="focus-presets" id="focusPresets">
+      <span class="sub">倒计时：</span>
+      <button class="focus-mini" data-m="15">15 分</button>
+      <button class="focus-mini" data-m="25">25 分</button>
+      <button class="focus-mini" data-m="45">45 分</button>
+      <button class="focus-mini" data-m="0">关闭</button>
     </div>
     <div class="focus-tip">Esc 也能退出 · 满 30 分 / 1 小时 / 2 小时会提醒你</div>
   </div>
