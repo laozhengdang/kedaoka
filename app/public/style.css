@@ -412,3 +412,7 @@ html[data-theme="dark"] #profPick { background: #23262c; color: var(--ink); }
 /* 背景图（自定义主题） */
 body.has-bg { background-size: cover; background-position: center; background-attachment: fixed; }
 body.has-bg #app { background: color-mix(in srgb, var(--bg) 82%, transparent); }
+
+/* 第一栏底部按钮 */
+.tool-foot { margin-top: auto; padding: 10px 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.tool-wide { width: 100%; text-align: left; }

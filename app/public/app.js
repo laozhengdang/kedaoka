@@ -378,9 +378,18 @@ function imgUrl(rel) {
 }
 
 function bindChrome() {
-  $('#btnCollapse').onclick = () => {
-    $('#sidebar').classList.toggle('collapsed');
+  const setCollapsed = (on) => {
+    $('#sidebar').classList.toggle('collapsed', on);
+    const t = $('#btnToggleCourses');
+    if (t) t.textContent = on ? '› 显示课程栏' : '‹ 收起课程栏';
+    try { localStorage.setItem('coursesCollapsed', on ? '1' : '0'); } catch { /* noop */ }
   };
+  $('#btnCollapse').onclick = () => setCollapsed(true);
+  $('#btnToggleCourses').onclick = () => setCollapsed(!$('#sidebar').classList.contains('collapsed'));
+  try {
+    if (localStorage.getItem('coursesCollapsed') === '1') setCollapsed(true);
+    else setCollapsed(false);
+  } catch { /* noop */ }
   $('#btnSettings').onclick = () => { location.hash = '#/settings'; };
   $('#btnNewCourse').onclick = openNewCourse;
   $('#newCourseClose').onclick = () => $('#newCourseModal').classList.add('hidden');
