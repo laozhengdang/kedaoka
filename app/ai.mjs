@@ -437,12 +437,11 @@ const DIAGRAM_SYSTEM = () => `你是${majorName()}专业的助教，要把一章
 
 export function startDiagramGen(courseId, opts = {}) {
   const id = uid('dgen_');
-  const job = { id, status: 'running', log: [], created: 0, error: '', title: '' };
+  const job = { id, status: 'running', log: [], created: 0, made: 0, error: '', title: '', diagramId: '' };
   diagramJobs.set(id, job);
   (async () => {
     const cfg = getAiConfig();
     if (cfg.baseUrl !== 'mock' && !cfg.apiKey) throw new Error('还没配置 API Key');
-    const chapter = opts.chapter || '';
 
     const rows = db.prepare(`
       SELECT c.front, c.back, c.source_page, sf.path AS file_path, pg.chapter
@@ -463,48 +462,68 @@ export function startDiagramGen(courseId, opts = {}) {
       return m ? m[0] : fn.replace(/\.[^.]+$/, '').replace(/^[0-9０-９]+[-\s._、]*/, '').trim();
     };
 
-    let pool = rows;
-    if (chapter) pool = rows.filter((r) => chOf(r) === chapter);
-    if (pool.length < 3) throw new Error(`这一章只有 ${pool.length} 个概念，画不出图`);
-    job.log.push(`候选概念 ${pool.length} 个${chapter ? `（${chapter}）` : ''}`);
-
-    const list = pool.slice(0, 70)
-      .map((r) => `- ${r.front}：${String(r.back || '').slice(0, 60)}`).join('\n');
-
-    const { text } = await chat(cfg, [
-      { role: 'system', content: DIAGRAM_SYSTEM() },
-      { role: 'user', content: `课程：${majorName()}\n章节：${chapter || '全课'}\n\n概念清单：\n${list}` },
-    ], { maxTokens: 1800 });
-
-    const parsed = parseJson(text);
-    if (!parsed || !Array.isArray(parsed.nodes) || parsed.nodes.length < 3) {
-      throw new Error('AI 没排出可用的图，再试一次');
+    // 需要画哪几章：指定一章 / 整门课一章 / 每一章各一张
+    let targets = [];
+    if (opts.all) {
+      const byCh = new Map();
+      for (const r of rows) {
+        const k = chOf(r) || '未分章';
+        if (!byCh.has(k)) byCh.set(k, []);
+        byCh.get(k).push(r);
+      }
+      targets = [...byCh.entries()]
+        .filter(([, list]) => list.length >= 3)
+        .sort((a, b) => b[1].length - a[1].length)
+        .slice(0, 6)
+        .map(([k]) => k);
+      job.log.push(`整门课分 ${targets.length} 章，逐章画（最多 6 张）`);
+    } else {
+      targets = [opts.chapter || ''];
     }
 
-    const names = new Set(pool.map((r) => r.front));
-    const nodes = parsed.nodes
-      .map((n) => String(n.label || '').trim())
-      .filter((n) => n && names.has(n));
-    if (nodes.length < 3) throw new Error('AI 用了清单里没有的名字，图作废');
-    const uniq = [...new Set(nodes)];
+    for (const chapter of targets) {
+      let pool = rows;
+      if (chapter) pool = rows.filter((r) => chOf(r) === chapter || (!chOf(r) && chapter === '未分章'));
+      if (pool.length < 3) { job.log.push(`「${chapter || '全课'}」概念不足，跳过`); continue; }
 
-    const edges = (parsed.edges || [])
-      .map((e) => ({ from: String(e.from || '').trim(), to: String(e.to || '').trim(), kind: e.kind || 'flow' }))
-      .filter((e) => uniq.includes(e.from) && uniq.includes(e.to) && e.from !== e.to);
+      job.log.push(`画「${chapter || '整门课'}」：候选 ${pool.length} 个概念`);
+      const list = pool.slice(0, 70)
+        .map((r) => `- ${r.front}：${String(r.back || '').slice(0, 60)}`).join('\n');
 
-    job.log.push(`AI 选了 ${uniq.length} 个概念、${edges.length} 条关系`);
+      const { text } = await chat(cfg, [
+        { role: 'system', content: DIAGRAM_SYSTEM() },
+        { role: 'user', content: `课程：${majorName()}\n章节：${chapter || '全课'}\n\n概念清单：\n${list}` },
+      ], { maxTokens: 1800 });
 
-    const xml = buildDiagramXml(uniq, edges, parsed.title);
-    const did = uid('dia_');
-    const title = String(parsed.title || '机制图').slice(0, 40);
-    db.prepare('INSERT INTO diagram(id,course_id,title,xml,created_at) VALUES(?,?,?,?,?)')
-      .run(did, courseId, title, xml, nowIso());
-    const linked = linkDiagramToCards(did, courseId, xml);
-    job.created = linked;
-    job.title = title;
-    job.diagramId = did;
+      const parsed = parseJson(text);
+      if (!parsed || !Array.isArray(parsed.nodes) || parsed.nodes.length < 3) {
+        job.log.push('  这一章 AI 没排出可用的图，跳过');
+        continue;
+      }
+      const names = new Set(pool.map((r) => r.front));
+      const uniq = [...new Set(parsed.nodes.map((n) => String(n.label || '').trim())
+        .filter((n) => n && names.has(n)))];
+      if (uniq.length < 3) { job.log.push('  AI 用了清单里没有的名字，跳过'); continue; }
+
+      const edges = (parsed.edges || [])
+        .map((e) => ({ from: String(e.from || '').trim(), to: String(e.to || '').trim(), kind: e.kind || 'flow' }))
+        .filter((e) => uniq.includes(e.from) && uniq.includes(e.to) && e.from !== e.to);
+
+      const xml = buildDiagramXml(uniq, edges, parsed.title);
+      const did = uid('dia_');
+      const title = String(parsed.title || `${chapter || '机制图'}`).slice(0, 40);
+      db.prepare('INSERT INTO diagram(id,course_id,title,xml,created_at) VALUES(?,?,?,?,?)')
+        .run(did, courseId, title, xml, nowIso());
+      const linked = linkDiagramToCards(did, courseId, xml);
+      job.created += linked;
+      job.made += 1;
+      job.title = title;
+      job.diagramId = did;
+      job.log.push(`  生成「${title}」：${uniq.length} 个概念、${edges.length} 条关系、挂到 ${linked} 张卡`);
+    }
+
+    if (!job.made) throw new Error('一张图都没画出来');
     job.status = 'done';
-    job.log.push(`已生成「${title}」，挂到 ${linked} 张卡片上`);
   })().catch((e) => {
     job.status = 'failed';
     job.error = String((e && e.message) || e);

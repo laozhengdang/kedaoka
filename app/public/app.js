@@ -1041,6 +1041,34 @@ async function viewDiagram(courseId, diagramId) {
   else if (list.diagrams.length) await renderDiagram(list.diagrams[0].id);
 }
 
+// 精修后自动逐章画图（导入流程里勾了"顺便画图"就走这里）
+async function drawAllChapters(courseId) {
+  const box = el('div', 'modal');
+  box.innerHTML = `
+    <div class="modal-box" style="width:600px">
+      <h3>AI 正在画机制图</h3>
+      <p class="hint">逐章挑概念、排关系，每章一张，最多 6 张。</p>
+      <pre class="log" id="dallLog">准备中…</pre>
+    </div>`;
+  document.body.appendChild(box);
+  const { job } = await api('POST', `/api/diagram-gen/${courseId}`, { all: true });
+  const timer = setInterval(async () => {
+    const j = await api('GET', `/api/diagram-job/${job}`);
+    const log = $('#dallLog');
+    if (log) log.textContent = (j.log || []).join('\n') || '准备中…';
+    if (j.status !== 'running') {
+      clearInterval(timer);
+      box.remove();
+      if (j.status === 'done') {
+        toast(`画好 ${j.made} 张机制图，挂到 ${j.created} 张卡`);
+        location.hash = `#/diagram/${courseId}/${j.diagramId}`;
+      } else {
+        toast('画图失败：' + (j.error || '未知错误'));
+      }
+    }
+  }, 1200);
+}
+
 // AI 画图：选章节（或不选=整门课），生成一张关系图
 async function generateDiagram(courseId, presetChapter = '') {
   const cfg = await api('GET', '/api/ai/config');
@@ -1058,7 +1086,8 @@ async function generateDiagram(courseId, presetChapter = '') {
       <div class="row" style="align-items:center;gap:10px">
         <label style="width:70px">范围</label>
         <select id="dgChapter" class="tool-select" style="flex:1">
-          <option value="">整门课</option>
+          <option value="">整门课（合成一张）</option>
+          <option value="__all">每一章各画一张（最多 6 张）</option>
           ${ch.chapters.map((c) => `<option value="${esc(c.name)}"${c.name === presetChapter ? ' selected' : ''}>${esc(c.name)}（${c.n} 个概念）</option>`).join('')}
         </select>
       </div>
@@ -1072,18 +1101,20 @@ async function generateDiagram(courseId, presetChapter = '') {
   $('#dgClose').onclick = () => box.remove();
   $('#dgGo').onclick = async () => {
     const chapter = $('#dgChapter').value;
+    const all = chapter === '__all';
     const log = $('#dgLog');
     log.classList.remove('hidden');
-    log.textContent = 'AI 正在读这一章的概念…';
+    log.textContent = all ? 'AI 正在逐章画…' : 'AI 正在读这一章的概念…';
     $('#dgGo').disabled = true;
-    const { job } = await api('POST', `/api/diagram-gen/${courseId}`, { chapter });
+    const { job } = await api('POST', `/api/diagram-gen/${courseId}`,
+      { chapter: all ? '' : chapter, all });
     const timer = setInterval(async () => {
       const j = await api('GET', `/api/diagram-job/${job}`);
       log.textContent = (j.log || []).join('\n') || '思考中…';
       if (j.status !== 'running') {
         clearInterval(timer);
         if (j.status === 'done') {
-          toast(`已生成「${j.title}」，挂到 ${j.created} 张卡`);
+          toast(`画好了 ${j.made} 张，共挂到 ${j.created} 张卡`);
           box.remove();
           await viewDiagram(courseId, j.diagramId);
         } else {
@@ -1684,7 +1715,7 @@ async function runAiTest(cfg) {
 }
 
 // ---------------- AI 精修 ----------------
-async function startRefine(courseId) {
+async function startRefine(courseId, opts = {}) {
   const cfg = await api('GET', '/api/ai/config');
   if (!cfg.hasKey && cfg.baseUrl !== 'mock') {
     toast('还没配置 API Key');
@@ -1692,10 +1723,10 @@ async function startRefine(courseId) {
     return;
   }
   const { job } = await api('POST', `/api/refine/${courseId}`, {});
-  showRefineBox(job);
+  showRefineBox(job, courseId, opts);
 }
 
-function showRefineBox(jobId) {
+function showRefineBox(jobId, courseId, opts = {}) {
   const box = el('div', 'modal');
   box.id = 'refineBox';
   box.innerHTML = `
@@ -1726,7 +1757,12 @@ function showRefineBox(jobId) {
         const b = await api('GET', '/api/bootstrap');
         STATE.courses = b.courses;
         renderSidebar();
-        setTimeout(() => { box.remove(); route(); }, 1200);
+        if (opts.autoDiagram) {
+          box.remove();
+          await drawAllChapters(courseId);
+        } else {
+          setTimeout(() => { box.remove(); route(); }, 1200);
+        }
       } else {
         toast('AI 整理失败：' + (j.error || '未知错误'));
       }
@@ -1832,17 +1868,21 @@ async function askRefineAfterImport(courseName) {
         <button id="aiNow" class="primary">现在用 AI 整理</button>
         <button id="aiLater" class="ghost">以后再说</button>
       </div>
+      <label style="display:block;margin-top:12px;font-size:13px;color:var(--muted)">
+        <input type="checkbox" id="aiAlsoDraw" checked> 顺便让 AI 把每一章画成机制图（会多花一点额度）
+      </label>
     </div>`;
   document.body.appendChild(box);
   $('#aiLater').onclick = () => { box.remove(); location.hash = `#/course/${c.id}`; };
   $('#aiNow').onclick = async () => {
+    const alsoDraw = $('#aiAlsoDraw').checked;
     box.remove();
     if (!cfg.hasKey && cfg.baseUrl !== 'mock') {
       toast('还没配置 API Key');
       location.hash = '#/settings';
       return;
     }
-    await startRefine(c.id);
+    await startRefine(c.id, { autoDiagram: alsoDraw });
   };
 }
 

@@ -388,7 +388,7 @@ const handlers = {
   // AI 自动画机制图
   'POST /api/diagram-gen/:id': async (p, b) => {
     const { startDiagramGen } = await import('./ai.mjs');
-    return { job: startDiagramGen(p.id, { chapter: b?.chapter || '' }) };
+    return { job: startDiagramGen(p.id, { chapter: b?.chapter || '', all: Boolean(b?.all) }) };
   },
   'GET /api/diagram-job/:id': async (p) => {
     const { getDiagramJob } = await import('./ai.mjs');
