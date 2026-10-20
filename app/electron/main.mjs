@@ -59,6 +59,32 @@ ipcMain.handle('open-external', async (_e, url) => {
 // 把库里的相对图片路径变成能直接放进 <img src> 的 file:// 地址
 ipcMain.handle('data-dir', async () => process.env.MIAOMIAO_DATA || '.');
 
+// 原生文件选择器：返回绝对路径
+ipcMain.handle('pick-files', async () => {
+  const { dialog } = await import('electron');
+  const r = await dialog.showOpenDialog(win || undefined, {
+    title: '选择课件',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '课件', extensions: ['pdf', 'pptx', 'ppt'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  });
+  return r.canceled ? [] : r.filePaths;
+});
+
+// 拖进来的文件：写到 data/incoming/ 下，返回绝对路径
+ipcMain.handle('drop-file', async (_e, payload = {}) => {
+  const { writeFileSync, mkdirSync } = await import('node:fs');
+  const { join, basename } = await import('node:path');
+  const dir = join(process.env.MIAOMIAO_DATA || '.', 'incoming');
+  mkdirSync(dir, { recursive: true });
+  const safe = String(payload.name || 'dropped.pdf').replace(/[\\/:*?"<>|]/g, '_');
+  const file = join(dir, basename(safe));
+  writeFileSync(file, Buffer.from(payload.buffer));
+  return file;
+});
+
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
 

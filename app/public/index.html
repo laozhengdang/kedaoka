@@ -39,8 +39,12 @@
 <div id="importModal" class="modal hidden">
   <div class="modal-box">
     <h3 id="importTitle">导入课件</h3>
-    <p class="hint">本地路径（PDF / PPTX）。解析不需要 API，纯本地跑。</p>
-    <input id="importPath" placeholder="C:\...\课件.pdf">
+    <p class="hint">点「选择文件」挑课件，或者直接把文件从微信/文件夹拖进这个窗口。</p>
+    <div class="row" style="margin-bottom:8px">
+      <button id="importPick" class="small">选择文件…</button>
+      <span class="sub" id="importPicked"></span>
+    </div>
+    <input id="importPath" placeholder="文件路径（选完会自动填）">
     <input id="importCourse" placeholder="学科名">
     <div class="row">
       <button id="importGo" class="primary">开始导入</button>

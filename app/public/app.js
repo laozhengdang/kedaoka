@@ -1,4 +1,4 @@
-﻿// app.js —— 前端（原生 JS，无构建）
+// app.js —— 前端（原生 JS，无构建）
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, html) => {
@@ -98,6 +98,72 @@ function bindChrome() {
   $('#newCourseGo').onclick = doNewCourse;
   $('#importClose').onclick = () => $('#importModal').classList.add('hidden');
   $('#importGo').onclick = doImport;
+  $('#importPick').onclick = pickImportFile;
+  bindDragDrop();
+}
+
+// ---------- 选文件 / 拖文件 ----------
+async function pickImportFile() {
+  if (!window.nativeApi || !window.nativeApi.pickFiles) {
+    toast('网页版没有文件选择器，请用桌面版');
+    return;
+  }
+  const files = await window.nativeApi.pickFiles();
+  if (!files || !files.length) return;
+  $('#importPath').value = files[0];
+  $('#importPicked').textContent = files.length > 1 ? `已选 ${files.length} 个（先导入第 1 个）` : '';
+  if (files.length > 1) toast(`选了 ${files.length} 个，当前只导入第一个`);
+}
+
+// 拖拽整个窗口：把文件字节交给主进程落盘，拿到真实绝对路径
+let dragOverlay = null;
+function bindDragDrop() {
+  const showHint = (on) => {
+    if (on && !dragOverlay) {
+      dragOverlay = el('div', 'drop-hint', '松手就导入');
+      document.body.appendChild(dragOverlay);
+    } else if (!on && dragOverlay) {
+      dragOverlay.remove();
+      dragOverlay = null;
+    }
+  };
+  window.addEventListener('dragenter', (e) => { e.preventDefault(); showHint(true); });
+  window.addEventListener('dragover', (e) => { e.preventDefault(); showHint(true); });
+  window.addEventListener('dragleave', (e) => {
+    if (e.clientX <= 0 || e.clientY <= 0) showHint(false);
+  });
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    showHint(false);
+    const files = [...(e.dataTransfer?.files || [])];
+    if (!files.length) return;
+    $('#importModal').classList.remove('hidden');
+    await intakeDropped(files);
+  });
+}
+
+async function intakeDropped(files) {
+  const log = $('#importLog');
+  if (!window.nativeApi || !window.nativeApi.dropFile) {
+    log.textContent = '网页版读不到真实路径，请用桌面版。';
+    return;
+  }
+  log.textContent = '正在接收文件…';
+  const paths = [];
+  for (const f of files) {
+    try {
+      const buf = await f.arrayBuffer();
+      const p = await window.nativeApi.dropFile(f.name, new Uint8Array(buf));
+      paths.push(p);
+    } catch (err) {
+      log.textContent = '接收失败：' + (err.message || err);
+      return;
+    }
+  }
+  $('#importPath').value = paths[0];
+  $('#importPicked').textContent = paths.length > 1 ? `还有 ${paths.length - 1} 个待导入` : '';
+  log.textContent = `已接收：\n${paths.join('\n')}\n点「开始导入」继续。`;
+  if (paths.length > 1) toast(`收到 ${paths.length} 个文件，先导入第一个`);
 }
 
 // ---------- 新建学科 ----------
@@ -984,7 +1050,13 @@ async function doImport() {
         renderSidebar();
         setTimeout(() => { $('#importModal').classList.add('hidden'); }, 900);
       } else {
-        toast('导入失败，看日志');
+        const tail = (j.log || '').split('\n').filter(Boolean).slice(-3).join(' ');
+        if (/文件不存在/.test(j.log || '')) {
+          toast('找不到这个文件，点「选择文件」重新选一次');
+          $('#importLog').textContent = (j.log || '') + '\n\n提示：手动输入的路径可能不完整，请用「选择文件」按钮。';
+        } else {
+          toast('导入失败：' + (tail || '看日志'));
+        }
       }
     }
   }, 700);
