@@ -144,10 +144,13 @@ const handlers = {
                       pg.chapter AS chapter, sf.path AS file_path
                FROM card c
                LEFT JOIN card_state s ON s.card_id=c.id
-               LEFT JOIN page pg ON pg.page_no=c.source_page
-                 AND pg.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
+               LEFT JOIN page pg ON pg.id = (
+                 SELECT p2.id FROM page p2
+                 WHERE p2.page_no = c.source_page
+                   AND p2.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
+                 ORDER BY p2.id LIMIT 1)
                LEFT JOIN source_file sf ON sf.id=pg.file_id
-               WHERE c.course_id=? AND c.status='active'`;
+               WHERE c.course_id=? AND c.status='active' AND c.is_title=0`;
     const args = [p.id];
     if (q) { sql += ' AND (c.front LIKE ? OR c.back LIKE ?)'; args.push(`%${q}%`, `%${q}%`); }
     if (filter === 'weak') sql += " AND COALESCE(s.state,'new') IN ('learning','relearning')";

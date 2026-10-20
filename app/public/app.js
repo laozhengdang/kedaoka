@@ -681,7 +681,7 @@ async function viewCard(id) {
   const w = el('div', 'wrap');
   w.innerHTML = `
     <div class="row" style="margin-bottom:12px">
-      <button class="ghost small" onclick="history.back()">← 返回</button>
+      <button class="ghost small" id="btnBack">← 返回仓库</button>
     </div>
     <div class="detail">
       <div class="term">${esc(c.front)}</div>
@@ -711,6 +711,8 @@ async function viewCard(id) {
   w.querySelectorAll('[data-go]').forEach((a) => {
     a.onclick = () => { location.hash = `#/card/${a.dataset.go}`; };
   });
+  const backBtn = $('#btnBack');
+  if (backBtn) backBtn.onclick = () => { location.hash = `#/browse/${c.course_id}`; };
   $('#btnEdit').onclick = () => $('#editor').classList.toggle('hidden');
   $('#eCancel').onclick = () => $('#editor').classList.add('hidden');
   $('#eSave').onclick = async () => {
@@ -970,13 +972,14 @@ async function viewOutline(courseId) {
   const w = el('div', 'wrap');
   w.innerHTML = `
     <div class="row" style="margin-bottom:10px">
-      <button class="ghost small" onclick="history.back()">← 返回</button>
+      <button class="ghost small" id="olBack">← 返回课程</button>
       <button id="olSave" class="small">导出 Markdown</button>
     </div>
     <h1>${esc(cname)} · 考前必备清单</h1>
     <p class="sub">${d.createdAt ? '生成于 ' + new Date(d.createdAt).toLocaleString('zh-CN') : ''}</p>
     <div class="detail outline" id="olBody"></div>`;
   m.appendChild(w);
+  $('#olBack').onclick = () => { location.hash = `#/course/${courseId}`; };
   $('#olBody').innerHTML = mdToHtml(d.content || '（还没有清单，回课程页点「一键复习清单」）');
   $('#olSave').onclick = async () => {
     try {
@@ -1078,6 +1081,14 @@ document.addEventListener('click', (e) => {
     e.target.classList.toggle('zoomed');
   }
 });
+
+// 图片加载失败（文件被删/路径失效）就把那块收起来，别留个破图
+document.addEventListener('error', (e) => {
+  const t = e.target;
+  if (t && t.tagName === 'IMG' && t.closest('.cardimg')) {
+    t.closest('.cardimg').remove();
+  }
+}, true);
 function debounce(fn, ms) {
   let t;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
