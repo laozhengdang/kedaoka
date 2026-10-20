@@ -137,6 +137,15 @@ CREATE TABLE IF NOT EXISTS daily_queue (
   UNIQUE(course_id, date, card_id)
 );
 
+-- 机制图：存 .drawio 的原始 XML，应用自己渲染（节点可点，跳卡片）
+CREATE TABLE IF NOT EXISTS diagram (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  xml TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 -- P-1 学习偏好：全局，跨课程
 CREATE TABLE IF NOT EXISTS profile (key TEXT PRIMARY KEY, value TEXT);
 `;

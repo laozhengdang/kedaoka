@@ -2,6 +2,7 @@
 // server.mjs（网页版）调 callApi；electron/main.mjs（桌面版）也调 callApi。
 
 import { spawn } from 'node:child_process';
+import zlib from 'node:zlib';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, getProfile, setProfile, today, nowIso, uid } from './db.mjs';
@@ -18,6 +19,109 @@ function chapterOf(fileName, pageChapter) {
   if (m) return m[0];
   const base = fileName.replace(/\.[^.]+$/, '').replace(/^[0-9０-９]+[-\s._、]*/, '').trim();
   return base.slice(0, 24);
+}
+
+// ---------- .drawio XML 解析（够用就好：矩形节点 + 连线） ----------
+// draw.io 有两种存法：明文 <mxGraphModel>，或把模型压成 base64(deflate) 塞进
+// <diagram> 文本 / .drawio.svg 的 content 属性里。两种都要能读。
+function expandDrawio(input) {
+  let xml = String(input);
+  if (xml.includes('<mxGraphModel')) return xml;
+
+  // .drawio.svg：<svg ... content="&lt;mxfile ...&gt;">
+  const contentAttr = xml.match(/content="([\s\S]*?)"\s/);
+  if (contentAttr) xml = xmlUnescape(contentAttr[1]);
+
+  const m = xml.match(/<diagram\b[^>]*>([\s\S]*?)<\/diagram>/);
+  if (!m) return xml;
+  const body = m[1].trim();
+  if (!body || body.startsWith('<mxGraphModel')) return xml;
+  try {
+    const inflated = zlib.inflateRawSync(Buffer.from(body, 'base64')).toString('utf8');
+    return decodeURIComponent(inflated);
+  } catch {
+    try { return decodeURIComponent(body); } catch { return xml; }
+  }
+}
+
+function xmlUnescape(s) {
+  return String(s)
+    .replace(/&#10;/g, '\n').replace(/&#9;/g, ' ')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function xmlAttr(text, name) {
+  const m = text.match(new RegExp(`\\b${name}="([^"]*)"`));
+  return m ? xmlUnescape(m[1]) : '';
+}
+
+function styleMap(style) {
+  const out = {};
+  for (const part of String(style || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0) out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+    else if (part.trim()) out[part.trim()] = '1';
+  }
+  return out;
+}
+
+function parseDiagramNodes(xml) {
+  const nodes = [];
+  const chunks = String(xml).split('<mxCell').slice(1);
+  for (const raw of chunks) {
+    const headEnd = raw.indexOf('>');
+    if (headEnd < 0) continue;
+    const head = raw.slice(0, headEnd);
+    const body = raw.slice(0, Math.max(0, raw.indexOf('</mxCell>')));
+    if (xmlAttr(head, 'vertex') !== '1') continue;
+    const text = xmlAttr(head, 'value');
+    if (!text || !text.trim()) continue;
+    const geo = body.match(/<mxGeometry\b[^>]*>/);
+    const g = geo ? geo[0] : head;
+    const num = (n, d = 0) => {
+      const v = xmlAttr(g, n);
+      const f = Number(v);
+      return Number.isFinite(f) && v !== '' ? f : d;
+    };
+    let x = num('x', NaN);
+    let y = num('y', NaN);
+    let w = num('width', NaN);
+    let h = num('height', NaN);
+    if (!Number.isFinite(x)) x = num('x', 0);
+    if (!Number.isFinite(y)) y = num('y', 0);
+    if (!Number.isFinite(w)) w = Number(xmlAttr(head, 'w')) || 120;
+    if (!Number.isFinite(h)) h = Number(xmlAttr(head, 'h')) || 40;
+    const st = styleMap(xmlAttr(head, 'style'));
+    nodes.push({
+      id: xmlAttr(head, 'id'),
+      text: text.replace(/\n/g, ' ').trim(),
+      x, y, w, h,
+      fill: st.fillColor || '#f6f7fb',
+      stroke: st.strokeColor || '#9aa3b2',
+      rounded: st.rounded === '1',
+      fontSize: Number(st.fontSize) || 13,
+      bold: st.fontStyle === '1',
+    });
+  }
+  return nodes;
+}
+
+function parseDiagramEdges(xml) {
+  const edges = [];
+  for (const raw of String(xml).split('<mxCell').slice(1)) {
+    const headEnd = raw.indexOf('>');
+    if (headEnd < 0) continue;
+    const head = raw.slice(0, headEnd);
+    if (xmlAttr(head, 'edge') !== '1') continue;
+    const source = xmlAttr(head, 'source');
+    const target = xmlAttr(head, 'target');
+    if (!source || !target) continue;
+    const st = styleMap(xmlAttr(head, 'style'));
+    edges.push({ source, target, label: xmlAttr(head, 'value'), dashed: st.dashed === '1' });
+  }
+  return edges;
 }
 
 // ---------- 排程（简化版 SM-2，见文档 D19 / D13） ----------
@@ -210,7 +314,43 @@ const handlers = {
     return { ok: true, ...r, queue: queueState(p.id) };
   },
 
-  // ---- 待修队列：被标记「释义有误 / 图配错」的卡 ----
+  // ---- 机制图 ----
+  'GET /api/diagrams/:id': (p) => {
+    const rows = db.prepare('SELECT id, title, created_at FROM diagram WHERE course_id=? ORDER BY created_at DESC')
+      .all(p.id);
+    return { total: rows.length, diagrams: rows };
+  },
+  'POST /api/diagram/:id': (p, b) => {
+    const xml = expandDrawio(String(b?.xml || ''));
+    if (!xml.includes('<mxCell')) throw new Error('这不像是 draw.io 文件（没找到 mxCell）');
+    const title = String(b?.title || '未命名机制图').slice(0, 60);
+    const id = uid('dia_');
+    db.prepare('INSERT INTO diagram(id,course_id,title,xml,created_at) VALUES(?,?,?,?,?)')
+      .run(id, p.id, title, xml, nowIso());
+    return { ok: true, id, title };
+  },
+  'GET /api/diagram/:id': (p) => {
+    const d = db.prepare('SELECT * FROM diagram WHERE id=?').get(p.id);
+    if (!d) throw new Error('机制图不存在');
+    const xml = expandDrawio(d.xml);
+    const nodes = parseDiagramNodes(xml);
+    // 节点文字对得上哪张卡，就挂上 id —— 这就是"点名词跳卡片"
+    // 比对时忽略空格、括号、顿号，避免"（筛选杂交瘤）"这种注解导致对不上
+    const norm = (s) => String(s || '').replace(/[\s\u3000（）()·、，,。:：]/g, '');
+    const cards = db.prepare("SELECT id, front FROM card WHERE course_id=? AND status='active'")
+      .all(d.course_id);
+    const byText = new Map(cards.map((c) => [norm(c.front), c.id]));
+    // 先去掉括号里的注解再比对：'HAT 选择培养基（筛选杂交瘤）' → 'HAT选择培养基'
+    const stripNote = (s) => String(s || '').replace(/[（(][^）)]*[）)]/g, '');
+    for (const n of nodes) {
+      n.cardId = byText.get(norm(stripNote(n.text))) || '';
+    }
+    return { diagram: { id: d.id, title: d.title, course_id: d.course_id }, nodes, edges: parseDiagramEdges(xml) };
+  },
+  'POST /api/diagram/:id/delete': (p) => {
+    db.prepare('DELETE FROM diagram WHERE id=?').run(p.id);
+    return { ok: true };
+  },
   // ---- 别名合并：把一张卡并到另一张（同一个概念的不同叫法） ----
   'POST /api/card/:id/merge': (p, b) => {
     const intoId = String(b?.intoId || '');
@@ -248,6 +388,7 @@ const handlers = {
     return { ok: true, into: dst.front, alias: src.front };
   },
 
+  // ---- 待修队列：被标记「释义有误 / 图配错」的卡 ----
   'GET /api/broken/:id': (p) => {
     const rows = db.prepare(`
       SELECT id, front, back, source_page, image_path, origin FROM card

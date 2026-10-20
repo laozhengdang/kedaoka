@@ -14,5 +14,6 @@ contextBridge.exposeInMainWorld('nativeApi', {
   // 自定义主题：选背景图并复制进数据目录
   pickImage: () => ipcRenderer.invoke('pick-image'),
   importBackground: (p) => ipcRenderer.invoke('import-background', p),
+  readText: (p) => ipcRenderer.invoke('read-text', p),
   isDesktop: true,
 });

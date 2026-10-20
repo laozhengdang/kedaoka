@@ -500,6 +500,7 @@ async function route() {
   if (parts[0] === 'graph' && parts[1]) return viewGraph(parts[1]);
   if (parts[0] === 'card' && parts[1]) return viewCard(parts[1]);
   if (parts[0] === 'exam' && parts[1]) return viewExam(parts[1]);
+  if (parts[0] === 'diagram' && parts[1]) return viewDiagram(parts[1], parts[2] || '');
   if (parts[0] === 'broken' && parts[1]) return viewBroken(parts[1]);
   if (parts[0] === 'outline' && parts[1]) return viewOutline(parts[1]);
   if (parts[0] === 'summary' && parts[1]) return viewSummary(parts[1]);
@@ -564,6 +565,7 @@ async function viewCourse(id) {
       <button id="btnOutline" class="small">一键复习清单</button>
       <button id="btnExam" class="small">模拟考</button>
       <button id="btnBroken" class="small">待修</button>
+      <button id="btnDiagrams" class="small">机制图</button>
     </div>
     <div class="tabs">
       <div class="tab active" data-t="today">今天</div>
@@ -589,6 +591,8 @@ async function viewCourse(id) {
   if (eb) eb.onclick = () => { location.hash = `#/exam/${id}`; };
   const bb = w.querySelector('#btnBroken');
   if (bb) bb.onclick = () => { location.hash = `#/broken/${id}`; };
+  const db2 = w.querySelector('#btnDiagrams');
+  if (db2) db2.onclick = () => { location.hash = `#/diagram/${id}`; };
 
   const body = w.querySelector('#tabBody');
   if (!d.queue.total) {
@@ -984,6 +988,129 @@ async function viewBroken(courseId) {
     row.appendChild(box);
     list.appendChild(row);
   }
+}
+
+// ---------------- 机制图 ----------------
+async function viewDiagram(courseId, diagramId) {
+  STATE.current = courseId;
+  renderSidebar();
+  const cname = (STATE.courses.find((x) => x.id === courseId) || {}).name || '';
+  const list = await api('GET', `/api/diagrams/${courseId}`);
+  const m = $('#main');
+  m.innerHTML = '';
+  const w = el('div', 'wrap');
+  w.innerHTML = `
+    <div class="row" style="margin-bottom:10px">
+      <button class="ghost small" id="diaBack">← 返回课程</button>
+      <button class="small" id="diaImport">导入 .drawio 文件</button>
+    </div>
+    <h1>${esc(cname)} · 机制图</h1>
+    <p class="sub">节点文字对得上卡片就能点开。在 draw.io 里画好、导出 .drawio 文件后导进来。</p>
+    <div class="row" id="diaList" style="flex-wrap:wrap;gap:8px"></div>
+    <div id="diaStageHolder" style="margin-top:18px"></div>`;
+  m.appendChild(w);
+  $('#diaBack').onclick = () => { location.hash = `#/course/${courseId}`; };
+  $('#diaImport').onclick = () => importDiagram(courseId);
+
+  const listBox = $('#diaList');
+  if (!list.total) {
+    listBox.innerHTML = '<span class="sub">还没有机制图</span>';
+  } else {
+    for (const d of list.diagrams) {
+      const b = el('button', 'small' + (d.id === diagramId ? ' primary' : ''), d.title);
+      b.onclick = () => { location.hash = `#/diagram/${courseId}/${d.id}`; };
+      listBox.appendChild(b);
+    }
+  }
+
+  if (diagramId) await renderDiagram(diagramId);
+  else if (list.diagrams.length) await renderDiagram(list.diagrams[0].id);
+}
+
+async function importDiagram(courseId) {
+  if (!window.nativeApi || !window.nativeApi.pickFiles) return toast('网页版不支持选文件');
+  const files = await window.nativeApi.pickFiles();
+  if (!files || !files.length) return;
+  const isDrawio = /\.(drawio|xml)$/i.test(files[0]);
+  if (!isDrawio) return toast('请选 .drawio 文件（在 draw.io 里 文件→保存为 .drawio）');
+  const xml = await window.nativeApi.readText(files[0]);
+  const title = files[0].split(/[\\/]/).pop().replace(/\.drawio$/i, '');
+  const r = await api('POST', `/api/diagram/${courseId}`, { xml, title });
+  toast(`已导入「${r.title}」`);
+  location.hash = `#/diagram/${courseId}/${r.id}`;
+  await viewDiagram(courseId, r.id);
+}
+
+async function renderDiagram(diagramId) {
+  const holder = $('#diaStageHolder');
+  const d = await api('GET', `/api/diagram/${diagramId}`);
+  if (!d.nodes.length) {
+    holder.innerHTML = '<p class="sub">这张图里没解析出节点（可能不是流程图）。</p>';
+    return;
+  }
+  const pad = 24;
+  const minX = Math.min(...d.nodes.map((n) => n.x)) - pad;
+  const minY = Math.min(...d.nodes.map((n) => n.y)) - pad;
+  const maxX = Math.max(...d.nodes.map((n) => n.x + n.w)) + pad;
+  const maxY = Math.max(...d.nodes.map((n) => n.y + n.h)) + pad;
+  const W = maxX - minX;
+  const H = maxY - minY;
+
+  const byId = new Map(d.nodes.map((n) => [n.id, n]));
+  const paths = [];
+  for (const e of d.edges) {
+    const a = byId.get(e.source);
+    const b = byId.get(e.target);
+    if (!a || !b) continue;
+    const ax = a.x + a.w / 2, ay = a.y + a.h;
+    const bx = b.x + b.w / 2, by = b.y;
+    // 竖直就直连，横向错开就拐一个弯（够用）
+    let dPath;
+    if (Math.abs(ax - bx) < 8) dPath = `M ${ax} ${ay} L ${bx} ${by}`;
+    else {
+      const my = (ay + by) / 2;
+      dPath = `M ${ax} ${ay} L ${ax} ${my} L ${bx} ${my} L ${bx} ${by}`;
+    }
+    paths.push(`<path d="${dPath}" fill="none" stroke="var(--edge)" stroke-width="1.4"
+      ${e.dashed ? 'stroke-dasharray="5 4"' : ''} marker-end="url(#arrow)"/>`);
+  }
+
+  const nodesHtml = d.nodes.map((n) => {
+    const cls = 'dia-node' + (n.cardId ? ' linked' : '');
+    const style = `left:${n.x - minX}px;top:${n.y - minY}px;width:${n.w}px;height:${n.h}px;` +
+      `background:${n.fill};border-color:${n.stroke};border-radius:${n.rounded ? 8 : 3}px;` +
+      `font-size:${n.fontSize}px;${n.bold ? 'font-weight:600;' : ''}`;
+    return `<div class="${cls}" style="${style}" data-card="${n.cardId}" title="${n.cardId ? '点开这张卡' : '没有对应卡片'}">${esc(n.text)}</div>`;
+  }).join('');
+
+  holder.innerHTML = `
+    <div class="dia-wrap" id="diaWrap">
+      <div class="dia-stage" id="diaStage" style="width:${W}px;height:${H}px">
+        <svg class="dia-edges" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+          <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--edge)"/></marker></defs>
+          ${paths.join('')}
+        </svg>
+        ${nodesHtml}
+      </div>
+    </div>
+    <p class="sub" style="margin-top:10px">带下划线的节点可以点，跳到对应卡片。</p>`;
+
+  const scale = () => {
+    const wrap = $('#diaWrap');
+    const stage = $('#diaStage');
+    if (!wrap || !stage) return;
+    const k = Math.min(1, (wrap.clientWidth - 4) / W);
+    stage.style.transform = `scale(${k})`;
+    wrap.style.height = `${H * k}px`;
+  };
+  scale();
+  window.addEventListener('resize', scale, { once: true });
+
+  holder.querySelectorAll('.dia-node.linked').forEach((n) => {
+    n.onclick = () => { location.hash = `#/card/${n.dataset.card}`; };
+  });
 }
 
 // ---------------- 结算 ----------------

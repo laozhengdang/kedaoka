@@ -59,6 +59,12 @@ ipcMain.handle('open-external', async (_e, url) => {
 // 把库里的相对图片路径变成能直接放进 <img src> 的 file:// 地址
 ipcMain.handle('data-dir', async () => process.env.MIAOMIAO_DATA || '.');
 
+// 读取文本文件（导入 .drawio 用）
+ipcMain.handle('read-text', async (_e, p) => {
+  const { readFileSync } = await import('node:fs');
+  return readFileSync(String(p), 'utf8');
+});
+
 // 独占全屏（专注计时器用）
 ipcMain.handle('set-fullscreen', async (_e, on) => {
   if (win) win.setFullScreen(Boolean(on));
@@ -288,6 +294,15 @@ app.whenReady().then(async () => {
         const shot2 = await win.webContents.capturePage();
         writeFileSync(join(process.env.MIAOMIAO_DATA || '.', 'shot-focus.png'), shot2.toPNG());
         await win.webContents.executeJavaScript("document.querySelector('#focusExit').click()");
+        // 机制图
+        await win.webContents.executeJavaScript(`(async () => {
+          const b = await window.nativeApi.invoke('GET', '/api/bootstrap');
+          const c = b.courses.find(x => x.name === '免疫学') || b.courses[0];
+          location.hash = '#/diagram/' + c.id;
+          await new Promise(r => setTimeout(r, 900));
+        })()`);
+        const shot3 = await win.webContents.capturePage();
+        writeFileSync(join(process.env.MIAOMIAO_DATA || '.', 'shot-diagram.png'), shot3.toPNG());
       } catch { /* noop */ }
       try {
         const { writeFileSync } = await import('node:fs');

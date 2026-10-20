@@ -416,3 +416,24 @@ body.has-bg #app { background: color-mix(in srgb, var(--bg) 82%, transparent); }
 /* 第一栏底部按钮 */
 .tool-foot { margin-top: auto; padding: 10px 10px 14px; display: flex; flex-direction: column; gap: 6px; }
 .tool-wide { width: 100%; text-align: left; }
+
+/* ---------- 机制图 ---------- */
+:root { --edge: #8a8f99; }
+html[data-theme="dark"] { --edge: #5b6270; }
+.dia-wrap { overflow: hidden; }
+.dia-stage { position: relative; transform-origin: top left; }
+.dia-edges { position: absolute; left: 0; top: 0; pointer-events: none; }
+.dia-node {
+  position: absolute; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 4px 8px; box-sizing: border-box;
+  border: 1px solid #9aa3b2; color: #222; line-height: 1.25;
+  white-space: normal; overflow: hidden;
+}
+.dia-node.linked {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 51, 153, .45);
+  text-underline-offset: 3px;
+}
+.dia-node.linked:hover { box-shadow: 0 0 0 2px var(--accent-soft); border-color: var(--accent); }
+html[data-theme="dark"] .dia-node { color: #e7e7e3; }
