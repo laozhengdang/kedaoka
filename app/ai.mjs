@@ -8,6 +8,7 @@
 
 import { createHash } from 'node:crypto';
 import { db, getProfile, setProfile, uid, nowIso } from './db.mjs';
+import { linkDiagramToCards } from './api.mjs';
 
 // ---------------- 配置 ----------------
 export function getAiConfig() {
@@ -408,6 +409,179 @@ async function chatText(cfg, messages, { maxTokens = 2000, temperature = 0.3 } =
   }
   const j = await res.json();
   return { text: j?.choices?.[0]?.message?.content || '' };
+}
+
+// ---------------- AI 自动画机制图 ----------------
+const diagramJobs = new Map();
+
+export function getDiagramJob(id) {
+  return diagramJobs.get(id) || { status: 'unknown' };
+}
+
+const DIAGRAM_SYSTEM = () => `你是${majorName()}专业的助教，要把一章的知识点画成一张"机制图"，让学生一眼看懂它们怎么串起来。
+
+给你的是一章里的概念清单和它们的解释。请挑出 8~14 个**彼此有逻辑关系**的概念，排出流程图。
+
+关系只允许这几种走向：
+- 因果（A 导致 B）、流程（先 A 后 B）、构成（A 包括 B）、并列对比（A 与 B 对立）
+
+规则：
+- 只能用清单里出现的概念名，不要自己造词，不要改写名字
+- 起点放最上游（原因、前提、分类的总称），终点放最下游（结果、应用、产物）
+- 不要画出环（A→B→A）
+- 概念少于 8 个就全用上，不要硬凑
+
+只输出 JSON：
+{"title":"不超过12字的图名","nodes":[{"label":"概念名"}],
+ "edges":[{"from":"概念名","to":"概念名","kind":"cause|flow|contain|contrast"}]}`;
+
+export function startDiagramGen(courseId, opts = {}) {
+  const id = uid('dgen_');
+  const job = { id, status: 'running', log: [], created: 0, error: '', title: '' };
+  diagramJobs.set(id, job);
+  (async () => {
+    const cfg = getAiConfig();
+    if (cfg.baseUrl !== 'mock' && !cfg.apiKey) throw new Error('还没配置 API Key');
+    const chapter = opts.chapter || '';
+
+    const rows = db.prepare(`
+      SELECT c.front, c.back, c.source_page, sf.path AS file_path, pg.chapter
+      FROM card c
+      LEFT JOIN page pg ON pg.id = (
+        SELECT p2.id FROM page p2 WHERE p2.file_id = COALESCE(c.file_id, p2.file_id)
+          AND p2.page_no = c.source_page
+          AND p2.file_id IN (SELECT id FROM source_file WHERE course_id = c.course_id)
+        ORDER BY p2.id LIMIT 1)
+      LEFT JOIN source_file sf ON sf.id = pg.file_id
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+      ORDER BY c.source_page`).all(courseId);
+
+    const chOf = (r) => {
+      if (r.chapter) return r.chapter;
+      const fn = r.file_path ? String(r.file_path).split(/[\\/]/).pop() : '';
+      const m = fn.match(/第[一二三四五六七八九十0-9]+[章节]/);
+      return m ? m[0] : fn.replace(/\.[^.]+$/, '').replace(/^[0-9０-９]+[-\s._、]*/, '').trim();
+    };
+
+    let pool = rows;
+    if (chapter) pool = rows.filter((r) => chOf(r) === chapter);
+    if (pool.length < 3) throw new Error(`这一章只有 ${pool.length} 个概念，画不出图`);
+    job.log.push(`候选概念 ${pool.length} 个${chapter ? `（${chapter}）` : ''}`);
+
+    const list = pool.slice(0, 70)
+      .map((r) => `- ${r.front}：${String(r.back || '').slice(0, 60)}`).join('\n');
+
+    const { text } = await chat(cfg, [
+      { role: 'system', content: DIAGRAM_SYSTEM() },
+      { role: 'user', content: `课程：${majorName()}\n章节：${chapter || '全课'}\n\n概念清单：\n${list}` },
+    ], { maxTokens: 1800 });
+
+    const parsed = parseJson(text);
+    if (!parsed || !Array.isArray(parsed.nodes) || parsed.nodes.length < 3) {
+      throw new Error('AI 没排出可用的图，再试一次');
+    }
+
+    const names = new Set(pool.map((r) => r.front));
+    const nodes = parsed.nodes
+      .map((n) => String(n.label || '').trim())
+      .filter((n) => n && names.has(n));
+    if (nodes.length < 3) throw new Error('AI 用了清单里没有的名字，图作废');
+    const uniq = [...new Set(nodes)];
+
+    const edges = (parsed.edges || [])
+      .map((e) => ({ from: String(e.from || '').trim(), to: String(e.to || '').trim(), kind: e.kind || 'flow' }))
+      .filter((e) => uniq.includes(e.from) && uniq.includes(e.to) && e.from !== e.to);
+
+    job.log.push(`AI 选了 ${uniq.length} 个概念、${edges.length} 条关系`);
+
+    const xml = buildDiagramXml(uniq, edges, parsed.title);
+    const did = uid('dia_');
+    const title = String(parsed.title || '机制图').slice(0, 40);
+    db.prepare('INSERT INTO diagram(id,course_id,title,xml,created_at) VALUES(?,?,?,?,?)')
+      .run(did, courseId, title, xml, nowIso());
+    const linked = linkDiagramToCards(did, courseId, xml);
+    job.created = linked;
+    job.title = title;
+    job.diagramId = did;
+    job.status = 'done';
+    job.log.push(`已生成「${title}」，挂到 ${linked} 张卡片上`);
+  })().catch((e) => {
+    job.status = 'failed';
+    job.error = String((e && e.message) || e);
+    job.log.push('失败：' + job.error);
+  });
+  return id;
+}
+
+// 把"概念 + 关系"排成 draw.io 风格的 XML：先分层，再定坐标
+function buildDiagramXml(labels, edges, title) {
+  const idx = new Map(labels.map((l, i) => [l, i]));
+  const incoming = new Map(labels.map((l) => [l, []]));
+  for (const e of edges) incoming.get(e.to)?.push(e.from);
+
+  // 最长路径分层：层次 = 前驱层数 + 1
+  const layer = new Map();
+  const calc = (name, seen = new Set()) => {
+    if (layer.has(name)) return layer.get(name);
+    if (seen.has(name)) return 0;
+    seen.add(name);
+    const preds = incoming.get(name) || [];
+    const v = preds.length ? Math.max(...preds.map((p) => calc(p, seen))) + 1 : 0;
+    layer.set(name, v);
+    return v;
+  };
+  for (const l of labels) calc(l);
+
+  const byLayer = new Map();
+  for (const l of labels) {
+    const k = layer.get(l) || 0;
+    if (!byLayer.has(k)) byLayer.set(k, []);
+    byLayer.get(k).push(l);
+  }
+
+  const NODE_H = 44;
+  const GAP_Y = 54;
+  const COL_GAP = 34;
+  const pos = {};
+  const layers = [...byLayer.keys()].sort((a, b) => a - b);
+  let maxW = 0;
+  for (const k of layers) {
+    const items = byLayer.get(k);
+    const widths = items.map((l) => Math.min(220, Math.max(120, l.length * 15 + 28)));
+    const totalW = widths.reduce((a, b) => a + b, 0) + COL_GAP * (items.length - 1);
+    maxW = Math.max(maxW, totalW);
+  }
+  for (const k of layers) {
+    const items = byLayer.get(k);
+    const widths = items.map((l) => Math.min(220, Math.max(120, l.length * 15 + 28)));
+    const totalW = widths.reduce((a, b) => a + b, 0) + COL_GAP * (items.length - 1);
+    let x = (maxW - totalW) / 2 + 40;
+    const y = 30 + k * (NODE_H + GAP_Y);
+    items.forEach((l, i) => {
+      pos[l] = { x, y, w: widths[i], h: NODE_H };
+      x += widths[i] + COL_GAP;
+    });
+  }
+
+  const esc2 = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const cell = (l, i) => {
+    const p = pos[l];
+    const isFirst = layer.get(l) === 0;
+    const st = isFirst
+      ? 'rounded=1;fillColor=#e8f0fb;strokeColor=#5b8fd6;fontSize=13;'
+      : 'rounded=1;fillColor=#fff3d6;strokeColor=#d9a520;fontSize=13;';
+    return `<mxCell id="n${i}" value="${esc2(l)}" style="${st}" vertex="1" x="${Math.round(p.x)}" y="${Math.round(p.y)}" w="${Math.round(p.w)}" h="${p.h}"/>`;
+  };
+  const edgeCell = (e, i) => {
+    const dashed = e.kind === 'contrast' ? 'dashed=1;' : '';
+    return `<mxCell id="e${i}" edge="1" source="n${idx.get(e.from)}" target="n${idx.get(e.to)}" style="edgeStyle=orthogonalEdgeStyle;${dashed}"/>`;
+  };
+
+  return `<mxfile><diagram><mxGraphModel><root>`
+    + labels.map(cell).join('')
+    + edges.map(edgeCell).join('')
+    + `</root></mxGraphModel></diagram></mxfile>`;
 }
 
 const refineJobs = new Map();

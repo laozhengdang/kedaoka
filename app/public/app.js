@@ -1015,6 +1015,7 @@ async function viewDiagram(courseId, diagramId) {
     <div class="row" style="margin-bottom:10px">
       <button class="ghost small" id="diaBack">← 返回课程</button>
       <button class="small" id="diaImport">导入 .drawio 文件</button>
+      <button class="small primary" id="diaGen">让 AI 画一张</button>
     </div>
     <h1>${esc(cname)} · 机制图</h1>
     <p class="sub">节点文字对得上卡片就能点开。在 draw.io 里画好、导出 .drawio 文件后导进来。</p>
@@ -1023,6 +1024,7 @@ async function viewDiagram(courseId, diagramId) {
   m.appendChild(w);
   $('#diaBack').onclick = () => { location.hash = `#/course/${courseId}`; };
   $('#diaImport').onclick = () => importDiagram(courseId);
+  $('#diaGen').onclick = () => generateDiagram(courseId);
 
   const listBox = $('#diaList');
   if (!list.total) {
@@ -1037,6 +1039,60 @@ async function viewDiagram(courseId, diagramId) {
 
   if (diagramId) await renderDiagram(diagramId);
   else if (list.diagrams.length) await renderDiagram(list.diagrams[0].id);
+}
+
+// AI 画图：选章节（或不选=整门课），生成一张关系图
+async function generateDiagram(courseId, presetChapter = '') {
+  const cfg = await api('GET', '/api/ai/config');
+  if (!cfg.hasKey && cfg.baseUrl !== 'mock') {
+    toast('画图要用 AI，先去设置里填 Key');
+    location.hash = '#/settings';
+    return;
+  }
+  const ch = await api('GET', `/api/chapters/${courseId}`);
+  const box = el('div', 'modal');
+  box.innerHTML = `
+    <div class="modal-box" style="width:560px">
+      <h3>让 AI 画一张机制图</h3>
+      <p class="hint">AI 会从这门课里挑出 8~14 个有逻辑关系的概念，排出因果/流程，然后自动挂到对应卡片上。</p>
+      <div class="row" style="align-items:center;gap:10px">
+        <label style="width:70px">范围</label>
+        <select id="dgChapter" class="tool-select" style="flex:1">
+          <option value="">整门课</option>
+          ${ch.chapters.map((c) => `<option value="${esc(c.name)}"${c.name === presetChapter ? ' selected' : ''}>${esc(c.name)}（${c.n} 个概念）</option>`).join('')}
+        </select>
+      </div>
+      <pre class="log hidden" id="dgLog"></pre>
+      <div class="row" style="margin-top:12px">
+        <button id="dgGo" class="primary">开始画</button>
+        <button id="dgClose" class="ghost">取消</button>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+  $('#dgClose').onclick = () => box.remove();
+  $('#dgGo').onclick = async () => {
+    const chapter = $('#dgChapter').value;
+    const log = $('#dgLog');
+    log.classList.remove('hidden');
+    log.textContent = 'AI 正在读这一章的概念…';
+    $('#dgGo').disabled = true;
+    const { job } = await api('POST', `/api/diagram-gen/${courseId}`, { chapter });
+    const timer = setInterval(async () => {
+      const j = await api('GET', `/api/diagram-job/${job}`);
+      log.textContent = (j.log || []).join('\n') || '思考中…';
+      if (j.status !== 'running') {
+        clearInterval(timer);
+        if (j.status === 'done') {
+          toast(`已生成「${j.title}」，挂到 ${j.created} 张卡`);
+          box.remove();
+          await viewDiagram(courseId, j.diagramId);
+        } else {
+          $('#dgGo').disabled = false;
+          toast('画图失败：' + (j.error || '未知错误'));
+        }
+      }
+    }, 1200);
+  };
 }
 
 async function importDiagram(courseId) {

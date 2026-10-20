@@ -125,7 +125,7 @@ function parseDiagramEdges(xml) {
 }
 
 // 把机制图里的节点文字和这门课的卡片对上，建立 card_diagram 关联
-function linkDiagramToCards(diagramId, courseId, xml) {
+export function linkDiagramToCards(diagramId, courseId, xml) {
   const norm = (s) => String(s || '').replace(/[\s\u3000（）()·、，,。:：]/g, '');
   const stripNote = (s) => String(s || '').replace(/[（(][^）)]*[）)]/g, '');
   const cards = db.prepare("SELECT id, front FROM card WHERE course_id=? AND status='active'").all(courseId);
@@ -383,6 +383,39 @@ const handlers = {
   'POST /api/diagram/:id/delete': (p) => {
     db.prepare('DELETE FROM diagram WHERE id=?').run(p.id);
     return { ok: true };
+  },
+
+  // AI 自动画机制图
+  'POST /api/diagram-gen/:id': async (p, b) => {
+    const { startDiagramGen } = await import('./ai.mjs');
+    return { job: startDiagramGen(p.id, { chapter: b?.chapter || '' }) };
+  },
+  'GET /api/diagram-job/:id': async (p) => {
+    const { getDiagramJob } = await import('./ai.mjs');
+    return getDiagramJob(p.id);
+  },
+  // 这门课有哪些章节（画图时选）
+  'GET /api/chapters/:id': (p) => {
+    const rows = db.prepare(`
+      SELECT sf.path AS file_path, pg.chapter, COUNT(*) n
+      FROM card c
+      LEFT JOIN page pg ON pg.id = (
+        SELECT p2.id FROM page p2 WHERE p2.file_id = COALESCE(c.file_id, p2.file_id)
+          AND p2.page_no = c.source_page
+          AND p2.file_id IN (SELECT id FROM source_file WHERE course_id=c.course_id)
+        ORDER BY p2.id LIMIT 1)
+      LEFT JOIN source_file sf ON sf.id = pg.file_id
+      WHERE c.course_id=? AND c.status='active' AND c.is_title=0
+      GROUP BY pg.chapter, sf.path`).all(p.id);
+    const map = new Map();
+    for (const r of rows) {
+      const fn = r.file_path ? String(r.file_path).split(/[\\/]/).pop() : '';
+      const m = fn.match(/第[一二三四五六七八九十0-9]+[章节]/);
+      const name = r.chapter || (m ? m[0] : fn.replace(/\.[^.]+$/, '').replace(/^[0-9０-９]+[-\s._、]*/, '').trim());
+      if (!name) continue;
+      map.set(name, (map.get(name) || 0) + r.n);
+    }
+    return { chapters: [...map.entries()].map(([name, n]) => ({ name, n })) };
   },
   // ---- 别名合并：把一张卡并到另一张（同一个概念的不同叫法） ----
   'POST /api/card/:id/merge': (p, b) => {
