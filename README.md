@@ -166,7 +166,7 @@ AI 判断"这词要不要留"时偏保守，刷掉的词进「待审」而不是
 ### 拿到成品
 
 到 [**Releases**](https://github.com/laozhengdang/miaomiao-study/releases/latest) 下载
-`miaomiao-study-v0.9.0.zip`（178 MB），解压后双击 `老郑荡的妙妙小工具.exe`。
+`miaomiao-study-v0.9.1.zip`（178 MB），解压后双击 `老郑荡的妙妙小工具.exe`。
 
 **不需要装 Python、不需要装 Node** —— Electron 引擎、Python 3.12、PyMuPDF 全部打包在里面。
 
