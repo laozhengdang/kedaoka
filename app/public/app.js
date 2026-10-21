@@ -2663,12 +2663,11 @@ async function viewSettings() {
     </div>
     <h2 id="sec-pref">显示偏好</h2>
     <div class="detail">
-      <label><input type="checkbox" id="pWeek" ${p.show_week ? 'checked' : ''}> 显示周视图</label><br>
-      <label><input type="checkbox" id="pProg" ${p.show_progress ? 'checked' : ''}> 显示总进度</label><br>
-      <label><input type="checkbox" id="pStreak" ${p.show_streak ? 'checked' : ''}> 显示连续天数</label><br>
-      <label><input type="checkbox" id="pSplash" ${p.splash ? 'checked' : ''}> 启动画面</label><br>
+      <label><input type="checkbox" id="pWeek" ${p.show_week ? 'checked' : ''}> 显示周视图</label>
+      <label><input type="checkbox" id="pProg" ${p.show_progress ? 'checked' : ''}> 显示总进度</label>
+      <label><input type="checkbox" id="pStreak" ${p.show_streak ? 'checked' : ''}> 显示连续天数</label>
+      <label><input type="checkbox" id="pSplash" ${p.splash ? 'checked' : ''}> 启动画面</label>
       <label><input type="checkbox" id="pShuffle" ${p.shuffle ? 'checked' : ''}> 复习乱序（每天打散顺序）</label>
-      <br>
       <label><input type="checkbox" id="pPlainBtn" ${p.plain_buttons ? 'checked' : ''}> 功能按钮用纯白色（不勾选=彩色区分）</label>
     </div>
     <div class="row" style="margin-top:16px">

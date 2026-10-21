@@ -180,6 +180,19 @@ input, textarea {
   width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px;
   font: inherit; background: var(--panel); color: var(--ink); margin-bottom: 8px;
 }
+/* 勾选框 / 单选框不能被上面的 width:100% 撑开，否则文字会被挤到右边 */
+input[type="checkbox"], input[type="radio"] {
+  width: auto; height: auto; padding: 0; margin: 0 8px 0 0;
+  flex: 0 0 auto; vertical-align: middle; accent-color: var(--accent);
+}
+/* 设置页里「勾选框 + 文字」一行一个，垂直居中 */
+.detail label {
+  display: flex; align-items: center; gap: 2px;
+  margin: 7px 0; font-size: 14px; line-height: 1.5;
+}
+.detail label input[type="checkbox"] { margin: 0 8px 0 0; }
+/* 但「每日新卡」那种标签+数字框的行仍然左对齐固定宽度 */
+.detail .row label { display: block; margin: 0; }
 textarea { min-height: 120px; font-family: var(--serif); }
 
 /* ---------- 弹层 ---------- */
