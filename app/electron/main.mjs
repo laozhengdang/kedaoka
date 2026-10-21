@@ -148,6 +148,27 @@ ipcMain.handle('drop-file', async (_e, payload = {}) => {
   return file;
 });
 
+// 首次运行（仅打包版）：桌面没有快捷方式就建一个
+async function ensureDesktopShortcut() {
+  try {
+    if (process.platform !== 'win32' || !app.isPackaged) return;
+    const { shell } = await import('electron');
+    const { existsSync } = await import('node:fs');
+    const os = await import('node:os');
+    const pathMod = await import('node:path');
+    const desktop = pathMod.join(os.homedir(), 'Desktop');
+    const lnk = pathMod.join(desktop, '老郑荡的妙妙小工具.lnk');
+    if (existsSync(lnk)) return;
+    shell.writeShortcutLink(lnk, 'create', {
+      target: process.execPath,
+      cwd: pathMod.dirname(process.execPath),
+      icon: process.execPath,
+      iconIndex: 0,
+      description: '把课件 PDF 变成能考的知识卡',
+    });
+  } catch { /* 建不了就算了，不影响使用 */ }
+}
+
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
 
@@ -171,6 +192,8 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
+
+  await ensureDesktopShortcut();
 
   if (UITEST) {
     win = new BrowserWindow({
