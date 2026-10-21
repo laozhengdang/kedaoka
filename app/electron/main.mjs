@@ -1,4 +1,4 @@
-// main.mjs —— 桌面版入口（Electron）
+﻿// main.mjs —— 桌面版入口（Electron）
 // 不开本地端口、不经过浏览器：直接用 IPC 调 api.mjs，前端加载本地文件。
 
 import { app, BrowserWindow, ipcMain, shell, Menu } from 'electron';
@@ -377,6 +377,55 @@ app.whenReady().then(async () => {
         setNav: document.querySelectorAll('.set-nav a').length,
       })`);
       log.push('控件体检: ' + audit);
+
+      // 计算器：打开 → 输入算式 → 读结果 → 截图 → 关闭
+      try {
+        const { writeFileSync: wf3 } = await import('node:fs');
+        const calc = await win.webContents.executeJavaScript(`(async () => {
+          const wait = (ms) => new Promise(r => setTimeout(r, ms));
+          document.querySelector('#btnCalc')?.click();
+          await wait(400);
+          const input = document.querySelector('#calcInput');
+          if (!input) return JSON.stringify({ ok: false, err: '没打开' });
+          const cases = ['sqrt(16)+3!', 'C(5,2)', 'ln(e^2)', '2^10', 'sin(30)'];
+          const out = [];
+          for (const c of cases) {
+            input.value = c;
+            input.dispatchEvent(new Event('input'));
+            await wait(60);
+            out.push(c + ' = ' + (document.querySelector('#calcResult')?.textContent || ''));
+          }
+          const btnCount = document.querySelectorAll('.calc-key, .calc-fn').length;
+          return JSON.stringify({ ok: true, btnCount, out });
+        })()`);
+        log.push('计算器: ' + calc);
+        log.push('计算器样式: ' + await win.webContents.executeJavaScript(`(() => {
+          const ov = document.querySelector('.calc-ov');
+          const box = document.querySelector('.calc-box');
+          if (!ov) return 'no overlay';
+          const cs = getComputedStyle(ov);
+          const r = ov.getBoundingClientRect();
+          const br = box ? box.getBoundingClientRect() : null;
+          return JSON.stringify({
+            display: cs.display, position: cs.position, zIndex: cs.zIndex,
+            opacity: cs.opacity, visibility: cs.visibility,
+            rect: [r.x | 0, r.y | 0, r.width | 0, r.height | 0],
+            box: br ? [br.x | 0, br.y | 0, br.width | 0, br.height | 0] : null,
+            bg: cs.backgroundColor,
+          });
+        })()`));
+        await win.webContents.executeJavaScript(`new Promise(r => setTimeout(r, 600))`);
+        const shotCalc = await win.webContents.capturePage();
+        // 再单独截计算器那块区域，排除整页合成的问题
+        try {
+          const rectShot = await win.webContents.capturePage({ x: 380, y: 20, width: 440, height: 760 });
+          wf3(join(process.env.MIAOMIAO_DATA || '.', 'shot-calc-box.png'), rectShot.toPNG());
+        } catch { /* noop */ }
+        wf3(join(process.env.MIAOMIAO_DATA || '.', 'shot-calc.png'), shotCalc.toPNG());
+        await win.webContents.executeJavaScript(`document.querySelector('#calcClose')?.click()`);
+      } catch (e) {
+        log.push('计算器测试出错: ' + e.message);
+      }
       // 专注计时器外观
       try {
         const { writeFileSync } = await import('node:fs');
