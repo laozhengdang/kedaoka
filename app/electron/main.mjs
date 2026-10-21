@@ -387,7 +387,7 @@ app.whenReady().then(async () => {
           await wait(400);
           const input = document.querySelector('#calcInput');
           if (!input) return JSON.stringify({ ok: false, err: '没打开' });
-          const cases = ['sqrt(16)+3!', 'C(5,2)', 'ln(e^2)', '2^10', 'sin(30)'];
+          const cases = ['0.1+0.2', '120 km/h to m/s', '5 mol/L * 2 L', 'sqrt(16)+3!', 'C(10,3)', '30 C to F'];
           const out = [];
           for (const c of cases) {
             input.value = c;
@@ -414,7 +414,9 @@ app.whenReady().then(async () => {
             bg: cs.backgroundColor,
           });
         })()`));
-        await win.webContents.executeJavaScript(`new Promise(r => setTimeout(r, 600))`);
+        // 截图前把窗口提到前面，否则合成层可能还没画出来
+        try { win.show(); win.focus(); } catch { /* noop */ }
+        await win.webContents.executeJavaScript(`new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))`);
         const shotCalc = await win.webContents.capturePage();
         // 再单独截计算器那块区域，排除整页合成的问题
         try {

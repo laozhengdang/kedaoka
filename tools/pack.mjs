@@ -45,7 +45,8 @@ if (existsSync(join(ROOT, 'runtime', 'python', 'python.exe'))) {
 say('3) 校验关键代码…');
 const mustHave = [
   ['app/public/app.js', ['loadBalance', 'expMd', 'pShuffle', 'pQuotes', 'openImageViewer']],
-  ['app/public/index.html', ['btnBalance', 'focusPresets']],
+  ['app/public/index.html', ['btnBalance', 'focusPresets', 'vendor/decimal.js']],
+  ['app/public/vendor/decimal.js', ['Decimal']],
   ['app/api.mjs', ['export/cards', 'card/:id/images']],
 ];
 let ok = true;

@@ -28,3 +28,15 @@
 3. 修改过的版本也要以 AGPL 发布
 
 如果只是想自己用，不用管这些。
+
+## 计算器相关的第三方代码
+
+| 组件 | 用途 | 许可 | 位置 |
+|---|---|---|---|
+| [decimal.js](https://github.com/MikeMcl/decimal.js/) 10.4.3 | 十进制高精度运算（计算器） | MIT | `app/public/vendor/decimal.js` |
+
+许可证原文见 `app/public/vendor/decimal.LICENCE.md`。
+
+**设计致谢**：[sharkdp/insect](https://github.com/sharkdp/insect)（MIT）是一个高精度科学计算器，
+本项目的计算器在**思路**上参考了它：十进制高精度、单位参与量纲运算、`120 km/h to m/s` 这种自然写法。
+解析器是本项目自己用递归下降实现的，**没有复制 insect 的源码**（它是 PureScript 写的，需要专用工具链编译）。

@@ -681,3 +681,11 @@ body.plain-buttons .btn-tint {
 .calc-hrow .e { color: var(--muted); font-family: ui-monospace, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .calc-hrow .r { font-weight: 600; font-family: ui-monospace, Consolas, monospace; flex: 0 0 auto; }
 .calc-none { font-size: 12px; color: var(--muted); text-align: center; margin: 10px 0; }
+
+/* 计算器：示例条 */
+.calc-examples { display: flex; gap: 5px; flex-wrap: wrap; margin: 2px 0 8px; }
+.calc-chip {
+  font: inherit; font-size: 11px; padding: 3px 8px; border-radius: 999px;
+  border: 1px dashed var(--line); background: transparent; color: var(--muted); cursor: pointer;
+}
+.calc-chip:hover { border-color: var(--accent); color: var(--accent); }
