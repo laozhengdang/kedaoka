@@ -616,15 +616,17 @@
     'sqrt(2)*sin(45)',
   ];
 
-  function openCalculator() {
+  function openCalculator(opts) {
+    const dock = opts && opts.dock === 'right';
     const exists = document.querySelector('.calc-ov');
     if (exists) {
+      if (dock) exists.classList.add('calc-ov-dock');
       const i = exists.querySelector('#calcInput');
       if (i) i.focus();
       return;
     }
     const ov = document.createElement('div');
-    ov.className = 'calc-ov';
+    ov.className = 'calc-ov' + (dock ? ' calc-ov-dock' : '');
     ov.innerHTML = `
       <div class="calc-box" role="dialog" aria-label="计算器">
         <div class="calc-head">
@@ -662,8 +664,11 @@
     };
     degBox.checked = state.deg;
 
-    const close = () => ov.remove();
-    ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
+    const close = () => {
+      ov.remove();
+      document.querySelector('#calcDock')?.classList.remove('hidden-by-calc');
+    };
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov && !ov.classList.contains('calc-ov-dock')) close(); });
     ov.querySelector('#calcClose').onclick = close;
 
     const preview = () => {

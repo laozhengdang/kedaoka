@@ -689,3 +689,44 @@ body.plain-buttons .btn-tint {
   border: 1px dashed var(--line); background: transparent; color: var(--muted); cursor: pointer;
 }
 .calc-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- 右边缘计算器把手 ---------- */
+.calc-dock {
+  position: fixed; right: 0; top: 50%; z-index: 96;
+  transform: translateY(-50%);
+  padding-left: 14px;              /* 给鼠标留一条可悬停的窄条 */
+}
+.calc-handle {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 14px 8px; border: 1px solid var(--line); border-right: none;
+  border-radius: 10px 0 0 10px; background: var(--panel); color: var(--muted);
+  font: inherit; font-size: 12px; cursor: pointer;
+  box-shadow: -2px 0 10px rgba(0,0,0,.06);
+  transform: translateX(calc(100% - 10px));   /* 平时只露 10px */
+  transition: transform .22s ease, color .2s ease, border-color .2s ease;
+}
+/* 鼠标靠近右边缘 → 整块滑出来 */
+.calc-dock:hover .calc-handle,
+.calc-dock:focus-within .calc-handle {
+  transform: translateX(0);
+  color: var(--accent); border-color: var(--accent);
+}
+.calc-handle-icon { font-size: 16px; line-height: 1; }
+.calc-handle-text { writing-mode: vertical-rl; letter-spacing: 2px; }
+.calc-dock.hidden-by-calc { transform: translate(calc(100% + 20px), -50%); transition: transform .2s ease; }
+
+/* 贴边展开的形态：不遮背景、贴右边、占满高度 */
+.calc-ov.calc-ov-dock {
+  background: transparent; justify-content: flex-end; align-items: stretch;
+  pointer-events: none;                 /* 空白处不拦截点击，方便看题 */
+}
+.calc-ov.calc-ov-dock .calc-box {
+  pointer-events: auto;
+  width: 384px; max-height: 100vh; height: 100vh; margin: 0;
+  border-radius: 12px 0 0 12px; border-right: none;
+  box-shadow: -8px 0 30px rgba(0,0,0,.18);
+  display: flex; flex-direction: column;
+  animation: calcSlideIn .18s ease;
+}
+.calc-ov.calc-ov-dock .calc-box .calc-pad { overflow: auto; }
+@keyframes calcSlideIn { from { transform: translateX(24px); opacity: .6; } to { transform: translateX(0); opacity: 1; } }

@@ -425,6 +425,33 @@ app.whenReady().then(async () => {
         } catch { /* noop */ }
         wf3(join(process.env.MIAOMIAO_DATA || '.', 'shot-calc.png'), shotCalc.toPNG());
         await win.webContents.executeJavaScript(`document.querySelector('#calcClose')?.click()`);
+
+        // 右边缘把手：点击 → 贴边展开 → 再截一张
+        try {
+          const dock = await win.webContents.executeJavaScript(`(async () => {
+            const wait = (ms) => new Promise(r => setTimeout(r, ms));
+            const h = document.querySelector('#calcHandle');
+            if (!h) return JSON.stringify({ ok: false, err: '没有把手' });
+            h.click();
+            await wait(450);
+            const ov = document.querySelector('.calc-ov');
+            const box = document.querySelector('.calc-box');
+            const br = box ? box.getBoundingClientRect() : null;
+            return JSON.stringify({
+              ok: !!ov && ov.classList.contains('calc-ov-dock'),
+              handleText: h.textContent.trim(),
+              rect: br ? [br.x | 0, br.width | 0, br.height | 0] : null,
+              hasInput: !!document.querySelector('#calcInput'),
+            });
+          })()`);
+          log.push('右边缘计算器: ' + dock);
+          await win.webContents.executeJavaScript(`new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+          const dockShot = await win.webContents.capturePage({ x: 700, y: 0, width: 486, height: 780 });
+          wf3(join(process.env.MIAOMIAO_DATA || '.', 'shot-calc-dock.png'), dockShot.toPNG());
+          await win.webContents.executeJavaScript(`document.querySelector('#calcClose')?.click()`);
+        } catch (e) {
+          log.push('右边缘计算器出错: ' + e.message);
+        }
       } catch (e) {
         log.push('计算器测试出错: ' + e.message);
       }

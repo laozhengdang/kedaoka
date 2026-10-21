@@ -141,6 +141,8 @@ function bindTools() {
   bindBalance();
   const calcBtn = $('#btnCalc');
   if (calcBtn) calcBtn.onclick = () => { if (window.MiaoCalcUI) window.MiaoCalcUI.openCalculator(); };
+  const calcHandle = $('#calcHandle');
+  if (calcHandle) calcHandle.onclick = () => { if (window.MiaoCalcUI) window.MiaoCalcUI.openCalculator({ dock: 'right' }); };
   document.querySelectorAll('#focusPresets [data-m]').forEach((b) => {
     b.onclick = () => {
       const m = Number(b.dataset.m);
