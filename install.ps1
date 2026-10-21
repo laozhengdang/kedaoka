@@ -1,4 +1,4 @@
-# 从源码安装并启动（Windows）
+﻿# 从源码安装并启动（Windows）
 # 用法：右键「使用 PowerShell 运行」，或在项目目录执行
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #
