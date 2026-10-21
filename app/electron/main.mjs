@@ -182,6 +182,28 @@ app.whenReady().then(async () => {
     });
     await win.loadFile(join(PUBLIC, 'index.html'));
     const log = [];
+    // 先截一张开屏（名言），再关掉它
+    try {
+      const { writeFileSync: wfS } = await import('node:fs');
+      const splashInfo = await win.webContents.executeJavaScript(`(async () => {
+        // 等开屏真正显示出来再读（boot 是异步的）
+        for (let i = 0; i < 25; i += 1) {
+          const box = document.querySelector('#splash');
+          if (box && !box.classList.contains('hidden')) break;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        const box = document.querySelector('#splash');
+        return JSON.stringify({
+          text: (document.querySelector('#splashQuote') || {}).textContent || '',
+          by: (document.querySelector('#splashAuthor') || {}).textContent || '',
+          visible: !!box && !box.classList.contains('hidden'),
+        });
+      })()`);
+      log.push('开屏: ' + splashInfo);
+      const shotSplash = await win.webContents.capturePage();
+      const dir = process.env.MIAOMIAO_DATA || '.';
+      wfS(join(dir, 'shot-splash.png'), shotSplash.toPNG());
+    } catch (e) { log.push('开屏截图失败: ' + e.message + ' / data=' + (process.env.MIAOMIAO_DATA || 'undefined')); }
     try {
       const sidebar = await win.webContents.executeJavaScript(`(async () => {
         // 关掉启动画面，否则会挡住后面的点击
@@ -421,6 +443,30 @@ app.whenReady().then(async () => {
         setNav: document.querySelectorAll('.set-nav a').length,
       })`);
       log.push('控件体检: ' + audit);
+
+      // 名言库：抽样 10 次看重复率，并读一次首页实际显示的那句
+      try {
+        const q = await win.webContents.executeJavaScript(`JSON.stringify((() => {
+          const pool = window.QUOTES || [];
+          const api = window.MiaoQuotes;
+          const out = [];
+          if (api) {
+            for (let i = 0; i < 10; i += 1) out.push(api.pick(null).t.slice(0, 14));
+          }
+          return { total: pool.length, picked: out.length, uniq: new Set(out).size, samples: out.slice(0, 4) };
+        })())`);
+        log.push('名言库: ' + q);
+        const home = await win.webContents.executeJavaScript(`(async () => {
+          location.hash = '#/';
+          await new Promise(r => setTimeout(r, 700));
+          const el = document.querySelector('.quote');
+          const flat = (s) => String(s || '').split(String.fromCharCode(10)).join(' ');
+          return JSON.stringify({ home: el ? flat(el.innerText).slice(0, 50) : 'NO_QUOTE' });
+        })()`);
+        log.push('首页名言: ' + home);
+      } catch (e) {
+        log.push('名言检查出错: ' + e.message);
+      }
 
       // 计算器：打开 → 输入算式 → 读结果 → 截图 → 关闭
       try {

@@ -47,6 +47,7 @@ const mustHave = [
   ['app/public/app.js', ['loadBalance', 'expMd', 'pShuffle', 'pQuotes', 'openImageViewer']],
   ['app/public/index.html', ['btnBalance', 'focusPresets', 'vendor/decimal.js']],
   ['app/public/vendor/decimal.js', ['Decimal']],
+  ['app/public/quotes.js', ['QUOTES']],
   ['app/api.mjs', ['export/cards', 'card/:id/images']],
 ];
 let ok = true;

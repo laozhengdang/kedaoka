@@ -743,3 +743,6 @@ body.plain-buttons .btn-tint {
 }
 .calc-ov.calc-ov-dock .calc-box .calc-pad { overflow: auto; }
 @keyframes calcSlideIn { from { transform: translateX(24px); opacity: .6; } to { transform: translateX(0); opacity: 1; } }
+
+/* 开屏名言出处 */
+.splash-author { margin-top: 14px; font-size: 13px; color: var(--muted); letter-spacing: .06em; }

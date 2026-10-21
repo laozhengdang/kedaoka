@@ -517,25 +517,56 @@ function showWizard() {
   paint();
 }
 
+// ---------------- 名言库 ----------------
+// 内置 130+ 条（quotes.js）+ 用户在设置里写的；每次启动随机挑，最近 8 条不重复。
+function quotePool(profile) {
+  const builtin = Array.isArray(window.QUOTES) ? window.QUOTES : [];
+  const custom = Array.isArray(profile && profile.quotes)
+    ? profile.quotes.filter(Boolean).map((s) => {
+      const [text, ...rest] = String(s).split('——');
+      return { t: text.trim(), a: rest.join('——').trim() };
+    })
+    : [];
+  const oneLine = (profile && profile.quote) ? String(profile.quote).trim() : '';
+  if (oneLine) {
+    const [text, ...rest] = oneLine.split('——');
+    custom.unshift({ t: text.trim(), a: rest.join('——').trim() });
+  }
+  return [...custom, ...builtin];
+}
+
+function pickQuote(profile) {
+  const pool = quotePool(profile).filter((q) => q && q.t);
+  if (!pool.length) return { t: '今天记住的每一个概念，都是考场上少慌的一秒。', a: '' };
+  let recent = [];
+  try { recent = JSON.parse(localStorage.getItem('quote_recent') || '[]'); } catch { recent = []; }
+  const fresh = pool.filter((q) => !recent.includes(q.t));
+  const list = fresh.length ? fresh : pool;
+  const pick = list[Math.floor(Math.random() * list.length)];
+  const next = [pick.t, ...recent.filter((x) => x !== pick.t)].slice(0, 8);
+  try { localStorage.setItem('quote_recent', JSON.stringify(next)); } catch { /* 忽略 */ }
+  return pick;
+}
+
+// 暴露给自测 / 控制台（不影响功能）
+window.MiaoQuotes = { pick: pickQuote, pool: quotePool, home: homeQuote };
+
+// 首页那句：一次会话内固定，重开会换
+function homeQuote(profile) {
+  if (!STATE.sessionQuote) STATE.sessionQuote = pickQuote(profile);
+  const q = STATE.sessionQuote;
+  return q.a ? `${q.t}——${q.a}` : q.t;
+}
+
 // 启动画面：一句名言，1.8 秒后淡出，点任意处跳过
 function showSplash(profile) {
   if (profile && profile.splash === false) return;
   const box = $('#splash');
   if (!box) return;
-  const quotes = [
-    '今天记住的每一个概念，都是考场上少慌的一秒。',
-    '背不下来的时候，就先看懂一遍。',
-    '一遍不会就两遍，两遍不会就换个说法。',
-    '你现在讨厌的这张卡，考场上会救你一次。',
-  ];
-  const seed = new Date().toISOString().slice(0, 10);
-  let h = 0;
-  for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) % 997;
-  const custom = Array.isArray(profile && profile.quotes) ? profile.quotes.filter(Boolean) : [];
-  const oneLine = (profile && profile.quote) ? profile.quote.split('——')[0].trim() : '';
-  const pool = custom.length ? custom : (oneLine ? [oneLine] : quotes);
-  const q = pool[h % pool.length];
-  $('#splashQuote').textContent = q;
+  const q = pickQuote(profile);
+  $('#splashQuote').textContent = q.t;
+  const by = $('#splashAuthor');
+  if (by) by.textContent = q.a ? `—— ${q.a}` : '';
   box.classList.remove('hidden');
   let done = false;
   const close = () => {
@@ -821,7 +852,7 @@ async function viewHome() {
   w.innerHTML = `
     <h1>今天</h1>
     <p class="sub">${STATE.courses.length} 门课程 · 待刷 ${totalLeft} 张</p>
-    ${ST (STATE.profile.quote || '')}`;
+    ${ST(homeQuote(STATE.profile))}`;
   if (!STATE.courses.length) {
     const guide = el('div', 'detail');
     guide.innerHTML = `
@@ -2637,7 +2668,7 @@ async function viewSettings() {
       </div>
       <p class="hint">写在首页顶上，给自己打气用。</p>
       <div style="margin-top:14px">
-        <label class="sub">启动名言库（每行一条，启动时随机挑一条）</label>
+        <label class="sub">我的名言（每行一条，会并进内置的 130 多条里一起随机）</label>
         <textarea id="pQuotes" style="width:100%;height:110px;margin-top:6px;font-size:13px"
           placeholder="一天一个概念&#10;背不下来就先看懂一遍">${esc((p.quotes || []).join('\n'))}</textarea>
       </div>
