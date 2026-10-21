@@ -288,6 +288,7 @@ A：余额查询只支持 DeepSeek 官方接口。换成别家的 Key，功能�
 - [AGENTS.md](AGENTS.md)：给 AI 助手的安装说明
 - [问卷-人工版](docs/问卷-人工版.md)：请同学试用后填的反馈表
 - [问卷-Agent版](docs/问卷-Agent版.md)：让同学的 AI 助手跑一遍并交结构化报告
+- Word 版问卷：[人工版](docs/word/使用问卷-人工版.docx) / [Agent 版](docs/word/使用问卷-Agent版.docx)（可直接发给同学填）
 
 ---
 
