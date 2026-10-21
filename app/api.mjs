@@ -368,9 +368,13 @@ const handlers = {
   'POST /api/review': (_p, b) => {
     const { cardId, rating, humanImportance = null, latencyMs = null, auto = 0 } = b || {};
     if (!cardId) throw new Error('缺少 cardId');
-    const st = schedule(cardId, rating, auto);
+    const card = db.prepare('SELECT id FROM card WHERE id=?').get(cardId);
+    if (!card) throw new Error('这张卡不存在（可能已经被合并或移除了）');
+    const r = Number(rating);
+    if (![1, 2, 3, 4].includes(r)) throw new Error('打分只能是 1/2/3/4');
+    const st = schedule(cardId, r, auto);
     db.prepare('INSERT INTO review_log(card_id,ts,rating,auto,human_importance,latency_ms) VALUES(?,?,?,?,?,?)')
-      .run(cardId, nowIso(), rating, auto ? 1 : 0, humanImportance, latencyMs);
+      .run(cardId, nowIso(), r, auto ? 1 : 0, humanImportance, latencyMs);
     markQueueDone(cardId);
     if (humanImportance !== null) db.prepare('UPDATE card SET importance=? WHERE id=?').run(humanImportance, cardId);
     return { ok: true, state: st };
@@ -642,6 +646,7 @@ const handlers = {
   'GET /api/export/cards/:id': (p) => {
     const fmt = p.query?.format === 'csv' ? 'csv' : 'md';
     const c = db.prepare('SELECT name FROM course WHERE id=?').get(p.id);
+    if (!c) throw new Error('课程不存在');
     const rows = db.prepare(`
       SELECT c.front, c.back, c.importance, c.source_page,
              pg.chapter AS ch, sf.path AS file_path
@@ -1111,7 +1116,18 @@ const handlers = {
 
   'GET /api/settings': () => ({ profile: getProfile() }),
   'POST /api/settings': (_p, b) => {
-    for (const [k, v] of Object.entries(b || {})) setProfile(k, v);
+    // 这几个字段必须是数字，别让 "abc" 混进数据库把队列算崩
+    const NUMERIC = ['daily_new_max', 'daily_review_max', 'card_timer_sec'];
+    const next = { ...(b || {}) };
+    for (const k of NUMERIC) {
+      if (!(k in next)) continue;
+      const n = Number(next[k]);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new Error(`${k} 要填数字（收到的是「${next[k]}」）`);
+      }
+      next[k] = Math.min(999, Math.round(n));
+    }
+    for (const [k, v] of Object.entries(next)) setProfile(k, v);
     return { ok: true, profile: getProfile() };
   },
 

@@ -2496,7 +2496,7 @@ async function viewCard(id) {
       const list = $('#addRelList');
       if (kw.length < 1) { list.innerHTML = ''; return; }
       const r = await api('GET', `/api/search?q=${encodeURIComponent(kw)}`);
-      const rows = (r.results || []).filter((x) => x.id !== c.id).slice(0, 8);
+      const rows = (r.hits || r.results || []).filter((x) => x.id !== c.id).slice(0, 8);
       list.innerHTML = rows.map((x) => `<div class="cardrow" data-pick="${x.id}">
         <span class="t">${esc(x.front)}</span><span class="pg">${esc(x.courseName || '')}</span></div>`).join('')
         || '<p class="sub">没找到</p>';

@@ -390,7 +390,17 @@ def main():
     data = path.read_bytes()
     sha = hashlib.sha256(data).hexdigest()
 
+    DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB)
+    # 空目录里没有表结构时给个说人话的提示，而不是 sqlite 原始报错
+    try:
+        conn.execute("SELECT 1 FROM source_file LIMIT 1")
+    except sqlite3.OperationalError:
+        print(json.dumps({
+            "ok": False,
+            "error": "这个数据目录还没有数据库结构。请先在程序里打开一次（它会建表），再来导入。",
+        }, ensure_ascii=False))
+        return
     conn.execute("PRAGMA foreign_keys = ON")
 
     exist = conn.execute("SELECT id, course_id FROM source_file WHERE sha256=?", (sha,)).fetchone()
@@ -453,6 +463,8 @@ def main():
     # 2.2) 考纲：不按颜色猜，直接按行拆考点
     if args.doc_type == "syllabus":
         syllabus_cards = 0
+        seen_syllabus = set()
+        item_start = re.compile(r"^(?:[0-9]{1,2}[.、)）]|[（(][0-9０-９]{1,2}[)）]|[①-⑳]|[一二三四五六七八九十]+、)")
         heading_re = re.compile(r"^(第[一二三四五六七八九十0-9]+[章节]|[一二三四五六七八九十]+、|[0-9]{1,2}[.、])")
         for pno in sorted(page_cache):
             for ln in page_cache[pno]:
@@ -463,6 +475,18 @@ def main():
                 name = re.sub(r"^[（(][0-9０-９]{1,2}[)）]\s*", "", name).strip()
                 if not name or name in ("目录", "前言", "附录"):
                     continue
+                # 考纲只收「掌握/熟悉/了解…」这类条目，或编号条目
+                kaodian = re.match(r"^(掌握|熟悉|了解|理解|应用|运用|会|能|重点|难点|考点)", name)
+                numbered = bool(item_start.match(text))
+                if not kaodian and not (numbered and len(name) <= 24):
+                    continue
+                if re.search(r"[：:]", name) or name.endswith(("。", "；", "，", "、")):
+                    continue
+                if any(w in name for w in ("讲授", "参考", "作业", "复习题", "思考题", "目录")):
+                    continue
+                if name in seen_syllabus:
+                    continue
+                seen_syllabus.add(name)
                 is_heading = bool(heading_re.match(name)) and len(name) <= 20
                 exists = conn.execute(
                     "SELECT c.id FROM term t JOIN concept c ON c.id=t.concept_id "
@@ -496,6 +520,7 @@ def main():
     # 2.3) 题库：按「题号 … 答案」切成一道道题
     if args.doc_type == "exam":
         exam_cards = 0
+        answers_found = [0]
         q_start = re.compile(r"^[（(]?([0-9]{1,3})[）).．、]")
         ans_re = re.compile(r"(参考|正确)?答案[：:]\s*([A-Da-d对错√×]{1,4})")
         cur = None   # {"no":int,"page":int,"lines":[]}
@@ -515,6 +540,8 @@ def main():
                 stem = first[:60]
             m = ans_re.search(body)
             answer = m.group(2) if m else ""
+            if m:
+                answers_found[0] += 1
             back = body if len(body) <= 400 else body[:400] + "…"
             if answer:
                 back = f"答案：{answer}\n\n{back}"
@@ -555,8 +582,10 @@ def main():
         flush()
         conn.commit()
         total = conn.execute("SELECT COUNT(*) FROM card WHERE course_id=?", (course_id,)).fetchone()[0]
+        if exam_cards and not answers_found[0]:
+            print("提示：没找到任何「答案：X」，这份文件可能不是题库——可以改成「授课课件」再导一次", flush=True)
         print(json.dumps({
-            "ok": True, "kind": "exam", "created": exam_cards,
+            "ok": True, "kind": "exam", "created": exam_cards, "answers": answers_found[0],
             "file_id": fid, "course_id": course_id, "total_cards": total,
         }, ensure_ascii=False))
         return
@@ -604,6 +633,11 @@ def main():
                 # 中文资料里空格没有意义，先全压掉（PDF 抽字常把「2.」抽成「2 .」）
                 raw = re.sub(r"\s+", "", (ln.get("text") or "")).strip()
                 if not raw:
+                    continue
+                # 版式行（讲授、学习目标、参考书目…）不是条目
+                if re.search(r"(讲授|授课|主讲|参考|教材|作业|思考题|复习题|学习目标|本章小结|目录)", raw):
+                    continue
+                if re.search(r"[：:]", raw) and len(raw) <= 16:
                     continue
                 ends_sentence = raw.endswith(("。", "，", "；", "、", "！", "？"))
                 is_new = bool(item_start.match(raw)) or raw.endswith(("：", ":")) \

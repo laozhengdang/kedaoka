@@ -230,10 +230,27 @@ app.whenReady().then(async () => {
         wf2(join(process.env.MIAOMIAO_DATA || '.', 'shot-course.png'), shotCourse.toPNG());
       } catch { /* noop */ }
       const r2 = await win.webContents.executeJavaScript(`(async () => {
+        // 先确保在课程页（前面几步可能跳到了别的页面）
+        const bs = await window.nativeApi.invoke('GET', '/api/bootstrap');
+        const cid = bs.courses[0] && bs.courses[0].id;
+        if (cid) {
+          location.hash = '#/course/' + cid;
+          await new Promise(r => setTimeout(r, 900));
+        }
         const btn = [...document.querySelectorAll('button')]
-          .find(b => /开始今天的|继续|看结算/.test(b.textContent));
-        if (!btn) return 'NO_BUTTON';
-        btn.click();
+          .find(b => /开始今天的|继续/.test(b.textContent));
+        if (!btn) {
+          // 今天已经刷完了：先点「再来一轮」造一个队列，再进复习屏
+          const extra = [...document.querySelectorAll('button')].find(b => /再来一轮/.test(b.textContent));
+          if (!extra) return 'NO_BUTTON_AND_NO_EXTRA｜已有按钮：' + [...document.querySelectorAll('button')].map(b => b.textContent.trim()).filter(Boolean).slice(0, 20).join('/');
+          extra.click();
+          await new Promise(r => setTimeout(r, 1600));
+          const btn2 = [...document.querySelectorAll('button')].find(b => /开始今天的|继续/.test(b.textContent));
+          if (!btn2) return 'STILL_NO_BUTTON';
+          btn2.click();
+        } else {
+          btn.click();
+        }
         await new Promise(r => setTimeout(r, 900));
         return document.querySelector('#revInner')?.innerText?.slice(0, 140) || 'EMPTY_REVIEW';
       })()`);
@@ -309,6 +326,33 @@ app.whenReady().then(async () => {
         });
       })()`);
       log.push('术语详情: ' + r7);
+
+      // 卡片编辑器：按钮是否齐全 + 加关联能否搜出结果
+      try {
+        const editor = await win.webContents.executeJavaScript(`(async () => {
+          const wait = (ms) => new Promise(r => setTimeout(r, ms));
+          const ids = ['btnEdit', 'btnSwapImg', 'btnRevert', 'btnAddRel', 'btnMerge'];
+          const present = {};
+          for (const id of ids) present[id] = !!document.querySelector('#' + id);
+          let hits = 0;
+          const add = document.querySelector('#btnAddRel');
+          if (add) {
+            add.click();
+            await wait(250);
+            const q = document.querySelector('#addRelQ');
+            if (q) {
+              q.value = '抗体';
+              q.dispatchEvent(new Event('input'));
+              await wait(700);
+              hits = document.querySelectorAll('#addRelList [data-pick]').length;
+            }
+          }
+          return JSON.stringify({ present, hits });
+        })()`);
+        log.push('卡片编辑器: ' + editor);
+      } catch (e) {
+        log.push('卡片编辑器检查出错: ' + e.message);
+      }
       // 配图：找一张有图的卡，看 <img> 有没有真的加载出来
       const r8 = await win.webContents.executeJavaScript(`(async () => {
         const wait = (ms) => new Promise(r => setTimeout(r, ms));
