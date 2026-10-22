@@ -959,7 +959,7 @@ async function viewCourse(id) {
     };
   });
   const delBtn = w.querySelector('#btnDeleteCourse');
-  if (delBtn) delBtn.onclick = () => confirmDeleteCourse(d.id, d.course.name, d.course.cards);
+  if (delBtn) delBtn.onclick = () => confirmDeleteCourse(d.course.id || id, d.course.name, d.course.cards);
 
   const rb = w.querySelector('#btnRefine');
   if (rb) rb.onclick = () => startRefine(id);
@@ -3389,6 +3389,10 @@ function debounce(fn, ms) {
 
 // 删除课程：必须手打课程名才让删（防误点）
 async function confirmDeleteCourse(courseId, courseName, cardCount) {
+  if (!courseId || courseId === 'undefined' || courseId === 'null') {
+    toast('拿不到课程 ID，删不了。刷新一下页面（Ctrl+R）再试。');
+    return;
+  }
   const box = el('div', 'modal');
   box.innerHTML = `
     <div class="modal-box" style="width:580px">

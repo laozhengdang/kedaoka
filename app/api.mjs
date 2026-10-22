@@ -1148,6 +1148,25 @@ const handlers = {
 
   'GET /api/courses': () => db.prepare('SELECT * FROM course ORDER BY created_at').all(),
 
+'POST /api/course': (_p, b) => {
+    const name = String(b?.name || '').trim();
+    if (!name) throw new Error('学科名不能为空');
+    const exists = db.prepare('SELECT id FROM course WHERE name=?').get(name);
+    if (exists) throw new Error('已经有同名学科了');
+    const profName = String(b?.profession || '兽医学').trim() || '兽医学';
+    let prof = db.prepare('SELECT id FROM profession WHERE name=?').get(profName);
+    if (!prof) {
+      prof = { id: uid('prof_') };
+      db.prepare('INSERT INTO profession(id,name) VALUES(?,?)').run(prof.id, profName);
+    }
+    const id = uid('course_');
+    db.prepare('INSERT INTO course(id,profession_id,name,mode,state,created_at) VALUES(?,?,?,?,?,?)')
+      .run(id, prof.id, name, b?.mode === 'calc' ? 'calc' : 'concept', 'active', nowIso());
+    return { ok: true, id, name };
+  },
+
+  // ---- AI 配置与精修 ----
+
   // 删除一门课：卡、页、概念、术语、机制图、队列、作答全清掉，图片目录一起删
   'DELETE /api/course/:id': (p, b) => {
     const c = db.prepare('SELECT id, name FROM course WHERE id=?').get(p.id);

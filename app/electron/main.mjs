@@ -471,37 +471,49 @@ app.whenReady().then(async () => {
         log.push('大文件通道出错: ' + e.message);
       }
 
-      // 删除课程按钮：课程页必须能找到（否则用户删不掉空课程）
+      // 删除课程：真的点一遍（建临时课 → 打开确认框 → 输入名字 → 删掉 → 验证没了）
       try {
         const del = await win.webContents.executeJavaScript(`(async () => {
-          const b = await window.nativeApi.invoke('GET', '/api/bootstrap');
-          const c = (b.courses || [])[0];
-          if (!c) return JSON.stringify({ ok: false, err: '没有课程可测' });
-          location.hash = '#/course/' + c.id;
-          await new Promise(r => setTimeout(r, 900));
+          const wait = (ms) => new Promise(r => setTimeout(r, ms));
+          const call = (m, p, b) => window.nativeApi.invoke(m, p, b);
+          const name = '自测临时课程-' + Date.now().toString().slice(-6);
+          const made = await call('POST', '/api/course', { name, profession: '兽医学' });
+          if (!made || !made.ok) return JSON.stringify({ ok: false, err: '建临时课失败' });
+
+          location.hash = '#/course/' + made.id;
+          await wait(1000);
           const btn = document.querySelector('#btnDeleteCourse');
           if (!btn) return JSON.stringify({ ok: false, err: '找不到删除按钮' });
           btn.click();
-          await new Promise(r => setTimeout(r, 400));
+          await wait(400);
           const input = document.querySelector('#delConfirm');
           const go = document.querySelector('#delGo');
           if (!input || !go) return JSON.stringify({ ok: false, err: '确认框没弹出来' });
           const before = go.disabled;
-          input.value = c.name;
+          // 先输错
+          input.value = '错误名字';
           input.dispatchEvent(new Event('input'));
-          const after = go.disabled;
-          return JSON.stringify({ ok: true, confirmWasDisabled: before, enabledAfterTyping: !after });
+          const stillDisabled = go.disabled;
+          // 再输对
+          input.value = name;
+          input.dispatchEvent(new Event('input'));
+          const enabled = !go.disabled;
+          go.click();
+          await wait(1200);
+
+          const b = await call('GET', '/api/bootstrap');
+          const stillThere = (b.courses || []).some((c) => c.name === name);
+          return JSON.stringify({
+            ok: !stillThere,
+            confirmDisabledAtStart: before,
+            wrongNameKeepsDisabled: stillDisabled,
+            rightNameEnables: enabled,
+            goneFromList: !stillThere,
+          });
         })()`);
-        log.push('删除课程按钮: ' + del);
-        // 截一张确认框的图，再关掉
-        try {
-          const { writeFileSync: wfD } = await import('node:fs');
-          const shotDel = await win.webContents.capturePage();
-          wfD(join(process.env.MIAOMIAO_DATA || '.', 'shot-delete.png'), shotDel.toPNG());
-        } catch { /* 截图失败不影响测试 */ }
-        await win.webContents.executeJavaScript(`document.querySelector('#delCancel')?.click()`);
+        log.push('删除课程流程: ' + del);
       } catch (e) {
-        log.push('删除课程按钮出错: ' + e.message);
+        log.push('删除课程流程出错: ' + e.message);
       }
       // 配图：找一张有图的卡，看 <img> 有没有真的加载出来
       const r8 = await win.webContents.executeJavaScript(`(async () => {
