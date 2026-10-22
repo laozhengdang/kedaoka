@@ -530,6 +530,10 @@ export function startDiagramGen(courseId, opts = {}) {
       WHERE c.course_id=? AND c.status='active' AND c.is_title=0
       ORDER BY c.source_page`).all(courseId);
 
+    if (rows.length < 3) {
+      throw new Error(`这门课只有 ${rows.length} 个概念，画机制图至少要 3 个。先多导几份课件，或手动加几张卡。`);
+    }
+
     const chOf = (r) => {
       if (r.chapter) return r.chapter;
       const fn = r.file_path ? String(r.file_path).split(/[\\/]/).pop() : '';
@@ -551,7 +555,13 @@ export function startDiagramGen(courseId, opts = {}) {
         .sort((a, b) => b[1].length - a[1].length)
         .slice(0, 6)
         .map(([k]) => k);
-      job.log.push(`整门课分 ${targets.length} 章，逐章画（最多 6 张）`);
+      if (!targets.length && rows.length >= 3) {
+        // 分不出章（或者每章都太小），就整门课画一张，别一张都不出
+        targets = [''];
+        job.log.push('分不出章，改成整门课画一张');
+      } else {
+        job.log.push(`整门课分 ${targets.length} 章，逐章画（最多 6 张）`);
+      }
     } else {
       targets = [opts.chapter || ''];
     }
@@ -597,7 +607,10 @@ export function startDiagramGen(courseId, opts = {}) {
       job.log.push(`  生成「${title}」：${uniq.length} 个概念、${edges.length} 条关系、挂到 ${linked} 张卡`);
     }
 
-    if (!job.made) throw new Error('一张图都没画出来');
+    if (!job.made) {
+      const why = job.log.filter((l) => l.includes('跳过')).slice(-2).join('；');
+      throw new Error(why ? `一张图都没画出来：${why}` : '一张图都没画出来（AI 没有排出可用的关系，可以再试一次）');
+    }
     job.status = 'done';
   })().catch((e) => {
     job.status = 'failed';

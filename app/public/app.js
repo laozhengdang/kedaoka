@@ -3110,6 +3110,29 @@ async function askRefineAfterImport(courseName) {
   const b = await api('GET', '/api/bootstrap');
   const c = b.courses.find((x) => x.name === courseName);
   if (!c) return;
+
+  // 一张卡都没抽到：别装作导入成功，直接说清楚怎么办
+  if (!c.cards) {
+    const box = el('div', 'modal');
+    box.innerHTML = `
+      <div class="modal-box" style="width:600px">
+        <h3>导入完成，但一张卡都没抽到</h3>
+        <p class="hint">课件能打开，但里面没有可用的文字（或者文字没有颜色标记）。常见原因：</p>
+        <ul class="hint" style="line-height:1.9">
+          <li><b>整页是图片/扫描件</b>：PPT 里文字被导出成了图片，程序读不到文字</li>
+          <li><b>用的是旧版 .ppt</b>：现在会自动转，但如果本机没装 PowerPoint 就转不了</li>
+          <li><b>文字都是黑色</b>：授课模式靠「红字=术语」抽卡，全黑的话抽不出来（可以试「考纲提纲」模式）</li>
+        </ul>
+        <p class="hint">建议：先用「考纲提纲」或「复习资料」模式再导一次同一份文件；</p>
+        <div class="row">
+          <button id="zeroClose" class="primary">知道了</button>
+        </div>
+      </div>`;
+    document.body.appendChild(box);
+    $('#zeroClose').onclick = () => { box.remove(); location.hash = `#/course/${c.id}`; };
+    return;
+  }
+
   const cfg = await api('GET', '/api/ai/config');
 
   const box = el('div', 'modal');

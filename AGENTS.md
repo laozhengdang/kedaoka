@@ -144,7 +144,7 @@ tools/
 |---|---|---|
 | `Cannot find module 'node:sqlite'` | Node 版本太低 | 升到 22+ |
 | 导入时报 `找不到 python` | 没装 Python 或不在 PATH | `pip install pymupdf`，或把嵌入式 Python 放 `runtime/python/` |
-| 旧 .ppt 导入报错 | PPT 的二进制旧格式，标准库读不了 | 让用户「另存为」.pptx 或 PDF |
+| 旧 .ppt 导入报错 | 本机没有 PowerPoint / WPS，无法自动转换 | 装 Office/WPS，或让用户「另存为」.pptx / PDF |
 | 点按钮没反应 | 写了内联 onclick，被 CSP 拦 | 在 JS 里 `el.onclick = ...` |
 | `npm start` 白屏 | 前端 JS 语法错误 | 开 DevTools（Ctrl+Shift+I）看 Console |
 | 打包后功能没变 | `打包.bat` 没真正复制 | 用 `node tools/pack.mjs`，它会校验并报错 |

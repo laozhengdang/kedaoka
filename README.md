@@ -166,7 +166,7 @@ AI 判断"这词要不要留"时偏保守，刷掉的词进「待审」而不是
 ### 拿到成品
 
 到 [**Releases**](https://github.com/laozhengdang/miaomiao-study/releases/latest) 下载
-`miaomiao-study-v0.9.2.zip`（178 MB），解压后双击 `老郑荡的妙妙小工具.exe`。
+`miaomiao-study-v0.9.3.zip`（178 MB），解压后双击 `老郑荡的妙妙小工具.exe`。
 
 **不需要装 Python、不需要装 Node** —— Electron 引擎、Python 3.12、PyMuPDF 全部打包在里面。
 
@@ -272,7 +272,8 @@ A：余额查询只支持 DeepSeek 官方接口。换成别家的 Key，功能�
 - 图片查看器不能并排对比两张图
 - 不能导出课程包分发给别人（只能整个 `data/` 拷走）
 - 支持 **PDF** 和 **PPTX**（PPTX 用标准库直接读，不需要装 Office）；
-- **旧版 .ppt 不支持**——那是微软的二进制格式，得先在 PowerPoint 里「另存为」.pptx 或 PDF
+- **旧版 .ppt 会自动转换**——借用本机的 PowerPoint 或 WPS 转成 .pptx 再读；
+  两个都没装的话，会让你「另存为」.pptx 或 PDF（程序会明确说明）
 - 只做了 Windows 版
 
 ---

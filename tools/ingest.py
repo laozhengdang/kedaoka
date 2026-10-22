@@ -19,6 +19,7 @@ import os
 import re
 import sqlite3
 import struct
+import subprocess
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
@@ -380,16 +381,92 @@ class PptxSource:
             pass
 
 
+# ---------------- 旧版 .ppt：借本机 PowerPoint / WPS 转成 .pptx ----------------
+PPT_CONVERT_PS1 = r'''param([string]$Src, [string]$Dst)
+$ErrorActionPreference = 'Stop'
+$apps = @('PowerPoint.Application', 'KWPP.Application')
+$app = $null
+foreach ($id in $apps) {
+  try { $app = New-Object -ComObject $id; break } catch { }
+}
+if (-not $app) { Write-Output 'NO_OFFICE'; exit 2 }
+try {
+  try { $app.Visible = $false } catch { }
+  $pres = $app.Presentations.Open($Src, $true, $false, $false)
+  # 24 = ppSaveAsOpenXMLPresentation (.pptx)
+  $pres.SaveAs($Dst, 24)
+  $pres.Close()
+  Write-Output 'OK'
+} catch {
+  Write-Output ("ERR " + $_.Exception.Message)
+  try { $app.Quit() } catch { }
+  exit 3
+}
+try { $app.Quit() } catch { }
+'''
+
+
+def convert_ppt_to_pptx(src: Path):
+    """把 .ppt 转成 .pptx（用本机 PowerPoint 或 WPS）。转不了返回 None。"""
+    if os.name != "nt":
+        return None
+    out_dir = DATA_DIR / "converted"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir = DATA_DIR / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    dst = out_dir / (src.stem + ".pptx")
+
+    # 已经转过、而且比源文件新，就直接用
+    try:
+        if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime and dst.stat().st_size > 0:
+            return dst
+    except OSError:
+        pass
+
+    ps1 = tmp_dir / "convert_ppt.ps1"
+    ps1.write_text(PPT_CONVERT_PS1, encoding="utf-8-sig")
+    print("[stage] 旧版 .ppt：正在调用 PowerPoint 转换…", flush=True)
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1),
+             "-Src", str(src), "-Dst", str(dst)],
+            capture_output=True, text=True, timeout=300,
+            encoding="utf-8", errors="replace",
+        )
+    except Exception as e:
+        print(f"[warn] 转换失败：{e}", flush=True)
+        return None
+    out = (r.stdout or "").strip()
+    if r.returncode == 0 and dst.exists() and dst.stat().st_size > 0:
+        print("[stage] .ppt 已转换成 .pptx", flush=True)
+        return dst
+    print(f"[warn] 转换没成功：{out or r.stderr[:200]}", flush=True)
+    return None
+
+
 def open_source(path: Path):
     ext = path.suffix.lower()
     if ext == ".pdf":
         return PdfSource(path)
     if ext == ".pptx":
-        return PptxSource(path)
+        try:
+            return PptxSource(path)
+        except (zipfile.BadZipFile, KeyError, ET.ParseError):
+            # 有可能是 .ppt 改了后缀：试着转一次
+            fixed = convert_ppt_to_pptx(path)
+            if fixed:
+                return PptxSource(fixed)
+            raise RuntimeError(
+                "这个 .pptx 打不开（不是标准的 PowerPoint 文件）。"
+                "如果是旧版 .ppt 改了后缀，请在 PowerPoint 里另存为 .pptx。"
+            )
     if ext == ".ppt":
+        fixed = convert_ppt_to_pptx(path)
+        if fixed:
+            return PptxSource(fixed)
         raise RuntimeError(
-            "旧版 .ppt 格式不支持（微软的二进制格式，需要 Office 才能读）。"
-            "请在 PowerPoint 里「另存为」.pptx 或 PDF，再导入这个文件。"
+            "旧版 .ppt 需要本机装了 PowerPoint 或 WPS 才能自动转换，这台电脑上没找到。"
+            "两个办法：① 用 PowerPoint/WPS 打开后「另存为」.pptx；② 另存为 PDF 再导入。"
         )
     if ext in (".doc", ".docx", ".wps"):
         raise RuntimeError(f"{ext} 不是课件格式，请导入 PDF 或 PPTX")
