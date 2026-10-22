@@ -18,7 +18,10 @@ import json
 import os
 import re
 import sqlite3
+import struct
 import uuid
+import zipfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -48,6 +51,8 @@ STOPWORDS = {
     "总结", "概述", "定义", "特点", "作用", "组成", "结构", "功能", "类型", "条件", "原则",
     "要求", "流程", "结果", "结论", "重点", "难点", "概述", "引言", "前言", "目录", "思考题",
     "复习思考题", "学习目标", "掌握", "熟悉", "了解", "举例", "实例", "例题", "习题",
+    "主要内容", "重点内容", "本节内容", "本章内容", "学习重点", "课堂小结", "思考与练习",
+    "目录", "封面", "结束", "谢谢", "提问", "讨论",
     "一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
 }
 
@@ -58,6 +63,20 @@ def now():
 
 def uid(p=""):
     return p + uuid.uuid4().hex[:8]
+
+
+def strip_chapter_prefix(text: str) -> str:
+    """把标题前面的「第一章」「第二节」「第3页」「第三讲」去掉"""
+    t = norm(text)
+    # 章节 / 页码 / 讲次 前缀（可能连着好几个，循环去掉）
+    for _ in range(3):
+        before = t
+        t = re.sub(r"^第[一二三四五六七八九十百0-9]+[章节篇部][、.．:：]*", "", t)
+        t = re.sub(r"^第?[0-9０-９]+[\s]*页[、.．:：]*", "", t)
+        t = re.sub(r"^第[一二三四五六七八九十百0-9]+讲[、.．:：]*", "", t)
+        if t == before:
+            break
+    return t.strip()
 
 
 def pick_main_term(page):
@@ -131,6 +150,252 @@ def extract_page_images(doc, page, out_dir: Path, course_id: str, page_no: int):
     return saved
 
 
+# ---------------- 文档来源：PDF / PPTX 统一接口 ----------------
+PPTX_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+PPTX_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+PPTX_PKG_REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+
+def _hex_color(val):
+    """'FF0000' -> 0xFF0000；拿不到就 0"""
+    try:
+        return int(str(val)[:6], 16)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _img_size(data: bytes):
+    """从 PNG/JPEG 头里读宽高，读不出返回 (0, 0)"""
+    try:
+        if data[:8] == b"\x89PNG\r\n\x1a\n":
+            w, h = struct.unpack(">II", data[16:24])
+            return w, h
+        if data[:2] == b"\xff\xd8":
+            i = 2
+            while i < len(data) - 9:
+                if data[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = data[i + 1]
+                if marker in (0xC0, 0xC1, 0xC2, 0xC3):
+                    h, w = struct.unpack(">HH", data[i + 5:i + 9])
+                    return w, h
+                seg = struct.unpack(">H", data[i + 2:i + 4])[0]
+                i += 2 + seg
+    except Exception:
+        pass
+    return 0, 0
+
+
+class PdfSource:
+    """原来的 PDF 路径：直接转调已有的几个函数"""
+
+    def __init__(self, path):
+        import pymupdf
+        self.doc = pymupdf.open(str(path))
+        self.n_pages = len(self.doc)
+
+    def lines(self, i):
+        return page_lines(self.doc[i])
+
+    def red_terms(self, i):
+        return red_terms_on_page(self.doc[i])
+
+    def main_term(self, i):
+        return pick_main_term(self.doc[i])
+
+    def images(self, out_dir, course_id, page_no):
+        return extract_page_images(self.doc, self.doc[page_no - 1], out_dir, course_id, page_no)
+
+    def probe(self):
+        chars = 0
+        imgs = 0
+        for pg in self.doc:
+            chars += len(pg.get_text("text"))
+            imgs += len(pg.get_images(full=True))
+        return chars, imgs
+
+    def close(self):
+        try:
+            self.doc.close()
+        except Exception:
+            pass
+
+
+class PptxSource:
+    """PPTX：用标准库读 zip + XML，不需要装 office 库
+
+    换页 = 换幻灯片；一页里的每个 <a:p> 段落当作一行。
+    红字颜色从 run 属性里读（a:rPr/a:solidFill/a:srgbClr），字号从 a:rPr@sz。
+    """
+
+    def __init__(self, path):
+        self.zip = zipfile.ZipFile(str(path))
+        self.path = Path(path)
+        names = [n for n in self.zip.namelist()
+                 if re.fullmatch(r"ppt/slides/slide[0-9]+\.xml", n)]
+        names.sort(key=lambda n: int(re.search(r"slide([0-9]+)\.xml", n).group(1)))
+        self.slides = names
+        self.n_pages = len(names)
+        self._cache = {}
+
+    # ---- 内部：解析一页的所有段落 ----
+    def _paras(self, i):
+        if i in self._cache:
+            return self._cache[i]
+        paras = []
+        try:
+            xml = self.zip.read(self.slides[i])
+            root = ET.fromstring(xml)
+        except Exception:
+            self._cache[i] = paras
+            return paras
+
+        for p in root.iter(PPTX_A + "p"):
+            runs = []
+            for r in p.iter(PPTX_A + "r"):
+                t_el = r.find(PPTX_A + "t")
+                if t_el is None or not (t_el.text or "").strip():
+                    continue
+                rpr = r.find(PPTX_A + "rPr")
+                color = 0
+                size = 18.0
+                if rpr is not None:
+                    sf = rpr.find(PPTX_A + "solidFill")
+                    if sf is not None:
+                        srgb = sf.find(PPTX_A + "srgbClr")
+                        if srgb is not None:
+                            color = _hex_color(srgb.get("val"))
+                    sz = rpr.get("sz")
+                    if sz:
+                        try:
+                            size = int(sz) / 100.0
+                        except ValueError:
+                            pass
+                runs.append({"t": t_el.text, "color": color, "size": size})
+            if runs:
+                paras.append(runs)
+        self._cache[i] = paras
+        return paras
+
+    def lines(self, i):
+        out = []
+        for runs in self._paras(i):
+            text = "".join(r["t"] for r in runs).strip()
+            if not text:
+                continue
+            red_chars = sum(len(r["t"]) for r in runs if r["color"] in REDS)
+            total = sum(len(r["t"]) for r in runs) or 1
+            color = next((r["color"] for r in runs if r["color"] in REDS), 0)
+            size = max(r["size"] for r in runs)
+            out.append({
+                "text": text,
+                "color": color,
+                "size": round(size, 1),
+                "red_ratio": red_chars / total,
+            })
+        return out
+
+    def red_terms(self, i):
+        terms = []
+        for runs in self._paras(i):
+            for r in runs:
+                if r["color"] in REDS and r["size"] >= 11:
+                    terms.extend(_expand(r["t"], r["color"]))
+        return terms
+
+    def main_term(self, i):
+        """标题：字号最大、且像术语的那一段"""
+        cands = []
+        for idx, runs in enumerate(self._paras(i)):
+            text = norm("".join(r["t"] for r in runs))
+            if not looks_like_term(text):
+                continue
+            size = max(r["size"] for r in runs)
+            cands.append((size, idx, text))
+        if not cands:
+            return None
+        max_size = max(c[0] for c in cands)
+        pool = [c for c in cands if c[0] >= max_size * 0.9]
+        pool.sort(key=lambda c: (-c[0], c[1]))
+        return pool[0][2]
+
+    def _slide_media(self, i):
+        """这一页引用了哪些图片（相对 ppt/ 的路径）"""
+        m = re.search(r"slide([0-9]+)\.xml$", self.slides[i])
+        if not m:
+            return []
+        rels_name = f"ppt/slides/_rels/slide{m.group(1)}.xml.rels"
+        try:
+            root = ET.fromstring(self.zip.read(rels_name))
+        except Exception:
+            return []
+        out = []
+        for rel in root:
+            if not (rel.get("Type") or "").endswith("/image"):
+                continue
+            target = rel.get("Target") or ""
+            target = target.replace("../", "")
+            full = f"ppt/{target}"
+            if full in self.zip.namelist():
+                out.append(full)
+        return out
+
+    def images(self, out_dir, course_id, page_no):
+        saved = []
+        for idx, name in enumerate(self._slide_media(page_no - 1)):
+            try:
+                data = self.zip.read(name)
+            except Exception:
+                continue
+            w, h = _img_size(data)
+            if w and h and (w < 160 or h < 160):
+                continue            # 太小的是图标
+            if len(data) < 3_000:   # 几乎空的图
+                continue
+            ext = name.rsplit(".", 1)[-1].lower()
+            if ext == "jpeg":
+                ext = "jpg"
+            if ext not in ("png", "jpg", "webp", "gif"):
+                continue
+            fname = f"p{page_no:03d}_{idx}.{ext}"
+            target = out_dir / fname
+            if not target.exists():
+                target.write_bytes(data)
+            saved.append((f"images/{course_id}/{fname}", len(data)))
+        saved.sort(key=lambda x: -x[1])
+        return saved
+
+    def probe(self):
+        chars = 0
+        for i in range(self.n_pages):
+            chars += sum(len(p) for p in self.lines(i))
+        imgs = sum(len(self._slide_media(i)) for i in range(self.n_pages))
+        return chars, imgs
+
+    def close(self):
+        try:
+            self.zip.close()
+        except Exception:
+            pass
+
+
+def open_source(path: Path):
+    ext = path.suffix.lower()
+    if ext == ".pdf":
+        return PdfSource(path)
+    if ext == ".pptx":
+        return PptxSource(path)
+    if ext == ".ppt":
+        raise RuntimeError(
+            "旧版 .ppt 格式不支持（微软的二进制格式，需要 Office 才能读）。"
+            "请在 PowerPoint 里「另存为」.pptx 或 PDF，再导入这个文件。"
+        )
+    if ext in (".doc", ".docx", ".wps"):
+        raise RuntimeError(f"{ext} 不是课件格式，请导入 PDF 或 PPTX")
+    raise RuntimeError(f"不支持的文件类型：{ext}（支持 .pdf / .pptx）")
+
+
 def norm(s: str) -> str:
     s = re.sub(r"\s+", "", s or "")
     # 去掉「1.」「2、」「（3）」这类序号
@@ -138,6 +403,8 @@ def norm(s: str) -> str:
     s = BAD_TAIL.sub("", s)
     s = s.lstrip("【（(《「『[<〈・·•◆■●▶►◇○△▲☆★① ②③④⑤⑥⑦⑧⑨⑩")
     s = BAD_TAIL.sub("", s)
+    # 残留的收尾符号（》」』) 等）
+    s = s.rstrip("》」』)）】]＞>〉")
     return s.strip()
 
 
@@ -162,6 +429,16 @@ def looks_like_term(s: str) -> bool:
     if any(ch in s for ch in "、，,：:；;。()（）【】[]/／"):
         return False
     if re.fullmatch(r"[0-9０-９.．%]+", s):
+        return False
+    # 章节号本身不是术语：第一章 / 第二节 / 一、
+    if re.fullmatch(r"第?[一二三四五六七八九十百0-9]+[章节篇部]", s):
+        return False
+    if re.fullmatch(r"[一二三四五六七八九十]+[、.．]", s):
+        return False
+    # 页码 / 页眉：第1页、P3、3页
+    if re.fullmatch(r"第?[0-9０-９]+\s*页", s):
+        return False
+    if re.fullmatch(r"[Pp]\.?[0-9０-９]{1,4}", s):
         return False
     return True
 
@@ -374,21 +651,29 @@ def main():
         raise SystemExit(f"文件不存在: {path}")
 
     if args.probe:
-        doc = pymupdf.open(path)
-        imgs = 0
-        chars = 0
-        for pg in doc:
-            chars += len(pg.get_text("text"))
-            imgs += len(pg.get_images(full=True))
-        print(json.dumps({
-            "ok": True, "probe": True, "pages": len(doc),
-            "images": imgs, "chars": chars,
-            "sizeMB": round(path.stat().st_size / 1048576, 1),
-        }, ensure_ascii=False))
+        try:
+            src = open_source(path)
+        except RuntimeError as e:
+            print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+            return
+        try:
+            chars, imgs = src.probe()
+            print(json.dumps({
+                "ok": True, "probe": True,
+                "pages": src.n_pages,
+                "images": imgs, "chars": chars,
+                "format": path.suffix.lower().lstrip("."),
+                "sizeMB": round(path.stat().st_size / 1048576, 1),
+            }, ensure_ascii=False))
+        finally:
+            src.close()
         return
 
-    data = path.read_bytes()
-    sha = hashlib.sha256(data).hexdigest()
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(4 * 1024 * 1024), b""):
+            h.update(chunk)
+    sha = h.hexdigest()
 
     DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB)
@@ -415,11 +700,23 @@ def main():
 
     course_id = ensure_course(conn, args.course_name, args.profession)
 
-    doc = pymupdf.open(path)
+    try:
+        src = open_source(path)
+    except RuntimeError as e:
+        conn.close()
+        print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+        return
+    except Exception as e:
+        conn.close()
+        print(json.dumps({
+            "ok": False,
+            "error": f"这个文件打不开：{e}（可能已损坏、被加密，或不是真正的 {path.suffix} 文件）",
+        }, ensure_ascii=False))
+        return
     fid = uid("file_")
     conn.execute(
         "INSERT INTO source_file(id,course_id,path,sha256,pages,imported_at,kind,doc_type) VALUES(?,?,?,?,?,?,?,?)",
-        (fid, course_id, str(path), sha, len(doc), now(), args.kind, args.doc_type),
+        (fid, course_id, str(path), sha, src.n_pages, now(), args.kind, args.doc_type),
     )
 
     # 1) 存页 + 抽图
@@ -430,16 +727,18 @@ def main():
     page_main_term = {}  # page_no -> 这一页的"主术语"（字号最大的红字）
     page_chapter = {}    # page_no -> 所属章节名
     current_chapter = None
-    for pno in range(len(doc)):
-        page = doc[pno]
-        lines = page_lines(page)
+    for pno in range(src.n_pages):
+        lines = src.lines(pno)
         page_cache[pno + 1] = lines
-        imgs = extract_page_images(doc, page, img_dir, course_id, pno + 1)
+        try:
+            imgs = src.images(img_dir, course_id, pno + 1)
+        except Exception:
+            imgs = []
         if imgs:
             page_images[pno + 1] = imgs[0][0]
-        page_main_term[pno + 1] = pick_main_term(page)
-        if (pno + 1) % 10 == 0:
-            print(f"[page] {{}}/{{}}".format(pno + 1, len(doc)), flush=True)
+        page_main_term[pno + 1] = src.main_term(pno)
+        if (pno + 1) % 10 == 0 or pno + 1 == src.n_pages:
+            print(f"[page] {pno + 1}/{src.n_pages}", flush=True)
         ch = detect_chapter(lines)
         if ch:
             current_chapter = ch
@@ -452,13 +751,37 @@ def main():
 
     # 2) 抽红字术语（跨页聚合）
     found = {}  # term -> {"pages": set, "color": int, "first_page": int}
-    for pno in range(len(doc)):
-        for term, color in red_terms_on_page(doc[pno]):
+    for pno in range(src.n_pages):
+        for term, color in src.red_terms(pno):
             d = found.setdefault(term, {"pages": set(), "color": color, "first_page": pno + 1})
             d["pages"].add(pno + 1)
             if color in STRONG:
                 d["color"] = color
-    doc.close()
+    src.close()
+
+    # 2.1) 兜底：这一页一个术语都没抽到（常见于「每页标题都一样」的课件），
+    #      就从正文里挑一条短的当术语，最多一条，避免整节课塌成一张卡
+    page_hit = {}
+    for term, meta in found.items():
+        for pno in meta["pages"]:
+            page_hit[pno] = True
+    if args.doc_type == "ppt":
+        for pno in sorted(page_cache):
+            if page_hit.get(pno):
+                continue
+            picked = None
+            for ln in page_cache[pno]:
+                cand = strip_chapter_prefix(ln.get("text", ""))
+                if not cand or len(cand) > 12:
+                    continue
+                if any(w in cand for w in ("的", "是", "在", "和", "与", "及")):
+                    continue
+                if not looks_like_term(cand) or cand in found:
+                    continue
+                picked = cand
+                break
+            if picked:
+                found[picked] = {"pages": {pno}, "color": 0, "first_page": pno}
 
     # 2.2) 考纲：不按颜色猜，直接按行拆考点
     if args.doc_type == "syllabus":
@@ -659,6 +982,9 @@ def main():
         return
 
     for pno, t in page_main_term.items():
+        if not t:
+            continue
+        t = strip_chapter_prefix(t)
         if not t or t in found:
             continue
         if not looks_like_term(t):

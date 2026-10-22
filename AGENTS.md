@@ -7,7 +7,7 @@
 
 ## 这是什么
 
-一个 Electron 桌面应用（不是网站）：把老师课件 PDF 变成知识卡，配间隔重复复习。
+一个 Electron 桌面应用（不是网站）：把老师课件（PDF / PPTX）变成知识卡，配间隔重复复习。
 业务逻辑在 `app/api.mjs`，两个入口共用它：
 
 - `app/electron/main.mjs` — 桌面入口（Electron 主进程）
@@ -39,7 +39,7 @@ https://github.com/laozhengdang/miaomiao-study/releases/latest
 | 依赖 | 版本 | 用途 | 检查命令 |
 |---|---|---|---|
 | Node.js | 22+ | 运行 Electron 主进程 | `node -v` |
-| Python | 3.10+ | 解析 PDF（PyMuPDF） | `python --version` |
+| Python | 3.10+ | 解析 PDF（PyMuPDF）；PPTX 只用标准库 | `python --version` |
 | pymupdf | 1.24+ | PDF 抽文字与图 | `python -c "import pymupdf"` |
 
 **Node 必须 22 以上**：代码用了内置的 `node:sqlite`，低版本没有这个模块，
@@ -111,7 +111,7 @@ node tools/selfcheck.mjs
    写 `onclick="..."` 到 HTML 里会被浏览器拦掉且**没有任何报错**。
 4. **数据库是内置 sqlite**：`node:sqlite`，没有原生模块，不需要编译。
    结构在 `app/db.mjs`，加字段用 `ensureColumn('表','列','列名 类型')`。
-5. **PDF 解析走子进程**：`tools/ingest.py` 由 `app/api.mjs` 的 `startImport()` 调起，
+5. **课件解析走子进程**：`tools/ingest.py` 由 `app/api.mjs` 的 `startImport()` 调起，
    优先用 `runtime/python/python.exe`（成品包内置），没有才用系统 `python`。
 6. **AI 功能需要用户自己的 API Key**，存在 `profile.ai_api_key`，代码里不硬编码。
    没有 Key 时导入会走「无 AI 降级模式」，仍然可用。
@@ -131,7 +131,7 @@ app/
 │  └─ preload.cjs      暴露给前端的 nativeApi
 └─ public/             index.html / app.js / style.css
 tools/
-├─ ingest.py           PDF → 卡片（支持 ppt / exam / notes / syllabus 四种解析）
+├─ ingest.py           PDF/PPTX → 卡片（支持 ppt / exam / notes / syllabus 四种解析）
 ├─ selfcheck.mjs       数据自检
 └─ pack.mjs            打包（复制 + 校验关键代码是否到位）
 ```
@@ -144,6 +144,7 @@ tools/
 |---|---|---|
 | `Cannot find module 'node:sqlite'` | Node 版本太低 | 升到 22+ |
 | 导入时报 `找不到 python` | 没装 Python 或不在 PATH | `pip install pymupdf`，或把嵌入式 Python 放 `runtime/python/` |
+| 旧 .ppt 导入报错 | PPT 的二进制旧格式，标准库读不了 | 让用户「另存为」.pptx 或 PDF |
 | 点按钮没反应 | 写了内联 onclick，被 CSP 拦 | 在 JS 里 `el.onclick = ...` |
 | `npm start` 白屏 | 前端 JS 语法错误 | 开 DevTools（Ctrl+Shift+I）看 Console |
 | 打包后功能没变 | `打包.bat` 没真正复制 | 用 `node tools/pack.mjs`，它会校验并报错 |

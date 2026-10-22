@@ -773,13 +773,35 @@ async function intakeDropped(files) {
   }
   log.textContent = '正在接收文件…';
   const paths = [];
+  const CHUNK = 8 * 1024 * 1024;   // 一次 8MB，几百 MB 的课件也不会撑爆 IPC
+
   for (const f of files) {
     try {
-      const buf = await f.arrayBuffer();
-      const p = await window.nativeApi.dropFile(f.name, new Uint8Array(buf));
-      paths.push(p);
+      // ① 优先直接拿真实路径：不复制、不读字节，多大的文件都一样快
+      let realPath = '';
+      if (window.nativeApi.getDroppedPath) {
+        try { realPath = window.nativeApi.getDroppedPath(f) || ''; } catch { realPath = ''; }
+      }
+      if (realPath) {
+        paths.push(realPath);
+        log.textContent = `已接收：${f.name}（${(f.size / 1048576).toFixed(1)} MB）`;
+        continue;
+      }
+
+      // ② 拿不到路径就分块写入
+      const { id } = await window.nativeApi.dropBegin(f.name, f.size);
+      let written = 0;
+      for (let off = 0; off < f.size; off += CHUNK) {
+        const end = Math.min(off + CHUNK, f.size);
+        const buf = await f.slice(off, end).arrayBuffer();
+        await window.nativeApi.dropChunk(id, off, new Uint8Array(buf));
+        written = end;
+        log.textContent = `正在接收 ${f.name}：${Math.round((written / f.size) * 100)}%（${(written / 1048576).toFixed(1)} / ${(f.size / 1048576).toFixed(1)} MB）`;
+      }
+      const saved = await window.nativeApi.dropEnd(id);
+      paths.push(saved.file);
     } catch (err) {
-      log.textContent = '接收失败：' + (err.message || err);
+      log.textContent = '接收失败：' + (err.message || err) + '\n（文件太大时容易失败，可以改用「选择文件」按钮）';
       return;
     }
   }
@@ -859,7 +881,7 @@ async function viewHome() {
       <h2>先做这四步</h2>
       <ol class="guide-list">
         <li><b>建一门学科</b>：中间栏底部「＋ 新建学科」，填课程名（例如 兽医免疫学）。</li>
-        <li><b>导入课件</b>：进这门课 →「＋ 导入课件到本学科」→ 选 PDF 或直接拖进来。</li>
+        <li><b>导入课件</b>：进这门课 →「＋ 导入课件到本学科」→ 选 PDF / PPTX，或直接拖进来。</li>
         <li><b>配 AI（可选）</b>：左栏「设置」填 API Key，导入后会由 AI 整理术语、画机制图。</li>
         <li><b>每天刷 10 张</b>：课程页「开始今天的」，四档自评即可。</li>
       </ol>

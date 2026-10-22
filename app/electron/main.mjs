@@ -136,7 +136,45 @@ ipcMain.handle('pick-files', async () => {
   return r.canceled ? [] : r.filePaths;
 });
 
-// 拖进来的文件：写到 data/incoming/ 下，返回绝对路径
+// 拖进来的文件（分块写入）：先开会话，再按 offset 逐块写，最后关文件
+const dropSessions = new Map();
+
+ipcMain.handle('drop-begin', async (_e, payload = {}) => {
+  const { openSync, mkdirSync } = await import('node:fs');
+  const { join, basename } = await import('node:path');
+  const dir = join(process.env.MIAOMIAO_DATA || '.', 'incoming');
+  mkdirSync(dir, { recursive: true });
+  const raw = String(payload.name || 'dropped.pdf');
+  const safe = basename(raw).replace(/[\\/:*?"<>|]/g, '_');
+  const file = join(dir, `${Date.now()}-${safe}`);
+  const fd = openSync(file, 'w');
+  const id = 'drop_' + Math.random().toString(36).slice(2, 10);
+  dropSessions.set(id, { fd, file, written: 0, size: Number(payload.size) || 0 });
+  return { id, file, maxChunk: 8 * 1024 * 1024 };
+});
+
+ipcMain.handle('drop-chunk', async (_e, payload = {}) => {
+  const { writeSync } = await import('node:fs');
+  const s = dropSessions.get(payload.id);
+  if (!s) throw new Error('接收会话已失效，请重新拖入文件');
+  const buf = Buffer.from(payload.buffer);
+  writeSync(s.fd, buf, 0, buf.length, s.written);
+  s.written += buf.length;
+  return { written: s.written, size: s.size };
+});
+
+ipcMain.handle('drop-end', async (_e, id) => {
+  const { closeSync, statSync } = await import('node:fs');
+  const s = dropSessions.get(id);
+  if (!s) throw new Error('接收会话已失效，请重新拖入文件');
+  try { closeSync(s.fd); } catch { /* 忽略 */ }
+  dropSessions.delete(id);
+  const real = statSync(s.file).size;
+  if (real === 0) throw new Error('文件是空的，可能拖错了东西');
+  return { file: s.file, size: real };
+});
+
+// 拖进来的文件：写到 data/incoming/ 下，返回绝对路径（旧接口，保留兼容）
 ipcMain.handle('drop-file', async (_e, payload = {}) => {
   const { writeFileSync, mkdirSync } = await import('node:fs');
   const { join, basename } = await import('node:path');
@@ -395,6 +433,32 @@ app.whenReady().then(async () => {
           return JSON.stringify({ present, hits });
         })()`);
         log.push('卡片编辑器: ' + editor);
+
+      // 大文件拖拽通道：分块写入是否能用（造 40MB 数据块，不碰真实文件）
+      try {
+        const big = await win.webContents.executeJavaScript(`(async () => {
+          if (!window.nativeApi.dropBegin) return JSON.stringify({ ok: false, err: '没有 dropBegin' });
+          const size = 40 * 1024 * 1024;
+          const chunk = new Uint8Array(8 * 1024 * 1024);
+          for (let i = 0; i < chunk.length; i += 4096) chunk[i] = i % 251;
+          const { id } = await window.nativeApi.dropBegin('big-test.bin', size);
+          let off = 0;
+          for (; off < size; off += chunk.length) {
+            await window.nativeApi.dropChunk(id, off, chunk);
+          }
+          const saved = await window.nativeApi.dropEnd(id);
+          return JSON.stringify({
+            ok: saved.size === size,
+            expect: size,
+            actual: saved.size,
+            path: saved.file,
+            hasDirectPathApi: typeof window.nativeApi.getDroppedPath === 'function',
+          });
+        })()`);
+        log.push('大文件通道: ' + big);
+      } catch (e) {
+        log.push('大文件通道出错: ' + e.message);
+      }
       } catch (e) {
         log.push('卡片编辑器检查出错: ' + e.message);
       }
