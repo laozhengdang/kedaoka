@@ -942,6 +942,7 @@ async function viewCourse(id) {
       <button id="btnPlan" class="small btn-tint btn-c-plan">考试模式</button>
       <button id="btnStats" class="small btn-tint btn-c-stats">学习统计</button>
       <button id="btnPending" class="small btn-tint btn-c-pending">待审</button>
+      <button id="btnDeleteCourse" class="small btn-danger" title="删除这门课和它的全部卡片">删除这门课</button>
     </div>
     <div class="tabs">
       <div class="tab active" data-t="today">今天</div>
@@ -957,6 +958,9 @@ async function viewCourse(id) {
       if (t.dataset.t === 'graph') location.hash = `#/graph/${id}`;
     };
   });
+  const delBtn = w.querySelector('#btnDeleteCourse');
+  if (delBtn) delBtn.onclick = () => confirmDeleteCourse(d.id, d.course.name, d.course.cards);
+
   const rb = w.querySelector('#btnRefine');
   if (rb) rb.onclick = () => startRefine(id);
   const ib = w.querySelector('#btnImportHere');
@@ -3381,4 +3385,45 @@ document.addEventListener('error', (e) => {
 function debounce(fn, ms) {
   let t;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+// 删除课程：必须手打课程名才让删（防误点）
+async function confirmDeleteCourse(courseId, courseName, cardCount) {
+  const box = el('div', 'modal');
+  box.innerHTML = `
+    <div class="modal-box" style="width:580px">
+      <h3 style="color:#c0392b">删除「${esc(courseName)}」</h3>
+      <p class="hint">会一起删掉：<b>${cardCount || 0} 张卡片</b>、所有页面、机制图、
+        复习进度、错题记录，以及导入的原课件副本。<br>
+        <b>删了不能恢复</b>（除非你自己备份过 data 文件夹）。</p>
+      <p class="hint">确认请输入课程名：<code>${esc(courseName)}</code></p>
+      <input id="delConfirm" class="tool-input" style="width:100%" placeholder="在这里输入课程名">
+      <div class="row" style="margin-top:12px">
+        <button id="delGo" class="danger" disabled>确认删除</button>
+        <button id="delCancel" class="ghost">取消</button>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+  const input = box.querySelector('#delConfirm');
+  const go = box.querySelector('#delGo');
+  box.querySelector('#delCancel').onclick = () => box.remove();
+  input.oninput = () => { go.disabled = input.value.trim() !== courseName; };
+  input.focus();
+  go.onclick = async () => {
+    go.disabled = true;
+    go.textContent = '删除中…';
+    try {
+      const r = await api('DELETE', `/api/course/${courseId}`, { confirm: courseName });
+      box.remove();
+      const b = await api('GET', '/api/bootstrap');
+      STATE.courses = b.courses;
+      renderSidebar();
+      toast(`已删除「${r.name}」：${r.deleted.card || 0} 张卡、${r.deleted.source_file || 0} 份课件`);
+      location.hash = '#/';
+    } catch (e) {
+      toast('删除失败：' + (e.message || e));
+      go.disabled = false;
+      go.textContent = '确认删除';
+    }
+  };
 }

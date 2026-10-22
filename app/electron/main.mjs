@@ -242,6 +242,15 @@ app.whenReady().then(async () => {
       },
     });
     await win.loadFile(join(PUBLIC, 'index.html'));
+
+    // UITEST 时把渲染进程的报错打出来（不然只看到 "Script failed to execute"）
+    win.webContents.on('console-message', (...args) => {
+      const e = args[0];
+      const level = typeof e === 'object' && e && 'level' in e ? e.level : args[1];
+      const msg = typeof e === 'object' && e && 'message' in e ? e.message : args[2];
+      const isError = level === 3 || level === 'error' || level === 2;
+      if (isError) console.log('[renderer]', String(msg).slice(0, 300));
+    });
     const log = [];
     // 先截一张开屏（名言），再关掉它
     try {
@@ -433,6 +442,9 @@ app.whenReady().then(async () => {
           return JSON.stringify({ present, hits });
         })()`);
         log.push('卡片编辑器: ' + editor);
+      } catch (e) {
+        log.push('卡片编辑器检查出错: ' + e.message);
+      }
 
       // 大文件拖拽通道：分块写入是否能用（造 40MB 数据块，不碰真实文件）
       try {
@@ -451,7 +463,6 @@ app.whenReady().then(async () => {
             ok: saved.size === size,
             expect: size,
             actual: saved.size,
-            path: saved.file,
             hasDirectPathApi: typeof window.nativeApi.getDroppedPath === 'function',
           });
         })()`);
@@ -459,8 +470,38 @@ app.whenReady().then(async () => {
       } catch (e) {
         log.push('大文件通道出错: ' + e.message);
       }
+
+      // 删除课程按钮：课程页必须能找到（否则用户删不掉空课程）
+      try {
+        const del = await win.webContents.executeJavaScript(`(async () => {
+          const b = await window.nativeApi.invoke('GET', '/api/bootstrap');
+          const c = (b.courses || [])[0];
+          if (!c) return JSON.stringify({ ok: false, err: '没有课程可测' });
+          location.hash = '#/course/' + c.id;
+          await new Promise(r => setTimeout(r, 900));
+          const btn = document.querySelector('#btnDeleteCourse');
+          if (!btn) return JSON.stringify({ ok: false, err: '找不到删除按钮' });
+          btn.click();
+          await new Promise(r => setTimeout(r, 400));
+          const input = document.querySelector('#delConfirm');
+          const go = document.querySelector('#delGo');
+          if (!input || !go) return JSON.stringify({ ok: false, err: '确认框没弹出来' });
+          const before = go.disabled;
+          input.value = c.name;
+          input.dispatchEvent(new Event('input'));
+          const after = go.disabled;
+          return JSON.stringify({ ok: true, confirmWasDisabled: before, enabledAfterTyping: !after });
+        })()`);
+        log.push('删除课程按钮: ' + del);
+        // 截一张确认框的图，再关掉
+        try {
+          const { writeFileSync: wfD } = await import('node:fs');
+          const shotDel = await win.webContents.capturePage();
+          wfD(join(process.env.MIAOMIAO_DATA || '.', 'shot-delete.png'), shotDel.toPNG());
+        } catch { /* 截图失败不影响测试 */ }
+        await win.webContents.executeJavaScript(`document.querySelector('#delCancel')?.click()`);
       } catch (e) {
-        log.push('卡片编辑器检查出错: ' + e.message);
+        log.push('删除课程按钮出错: ' + e.message);
       }
       // 配图：找一张有图的卡，看 <img> 有没有真的加载出来
       const r8 = await win.webContents.executeJavaScript(`(async () => {

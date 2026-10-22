@@ -3,7 +3,7 @@
 
 import { spawn } from 'node:child_process';
 import zlib from 'node:zlib';
-import { existsSync, copyFileSync, mkdirSync } from 'node:fs';
+import { existsSync, copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, getProfile, setProfile, today, nowIso, uid } from './db.mjs';
@@ -1148,25 +1148,75 @@ const handlers = {
 
   'GET /api/courses': () => db.prepare('SELECT * FROM course ORDER BY created_at').all(),
 
-  // 新建学科（先建空课程，再往里导课件）
-  'POST /api/course': (_p, b) => {
-    const name = String(b?.name || '').trim();
-    if (!name) throw new Error('学科名不能为空');
-    const exists = db.prepare('SELECT id FROM course WHERE name=?').get(name);
-    if (exists) throw new Error('已经有同名学科了');
-    const profName = String(b?.profession || '兽医学').trim() || '兽医学';
-    let prof = db.prepare('SELECT id FROM profession WHERE name=?').get(profName);
-    if (!prof) {
-      prof = { id: uid('prof_') };
-      db.prepare('INSERT INTO profession(id,name) VALUES(?,?)').run(prof.id, profName);
+  // 删除一门课：卡、页、概念、术语、机制图、队列、作答全清掉，图片目录一起删
+  'DELETE /api/course/:id': (p, b) => {
+    const c = db.prepare('SELECT id, name FROM course WHERE id=?').get(p.id);
+    if (!c) throw new Error('课程不存在');
+    const typed = String((b && b.confirm) || '').trim();
+    if (typed !== c.name) throw new Error('确认名称不对，没有删除');
+
+    // 不同版本的表结构不完全一样：先看清有没有这张表/这一列，再删
+    const colsOf = (name) => {
+      const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
+      if (!row) return null;
+      return db.prepare(`PRAGMA table_info("${name}")`).all().map((x) => x.name);
+    };
+    const del = (counts, key, table, where, ...args) => {
+      const cols = colsOf(table);
+      if (!cols) return;
+      const m = where.match(/WHERE\s+(\w+)/i);
+      if (m && !cols.includes(m[1])) return;
+      counts[key] = db.prepare(`DELETE FROM ${table} ${where}`).run(...args).changes;
+    };
+
+    const files = db.prepare('SELECT id, path FROM source_file WHERE course_id=?').all(c.id);
+    const counts = {};
+
+    db.exec('BEGIN');
+    try {
+      del(counts, 'card_state', 'card_state', 'WHERE card_id IN (SELECT id FROM card WHERE course_id=?)', c.id);
+      del(counts, 'review_log', 'review_log', 'WHERE card_id IN (SELECT id FROM card WHERE course_id=?)', c.id);
+      del(counts, 'card_diagram', 'card_diagram',
+        'WHERE card_id IN (SELECT id FROM card WHERE course_id=?) OR diagram_id IN (SELECT id FROM diagram WHERE course_id=?)',
+        c.id, c.id);
+      del(counts, 'daily_queue', 'daily_queue', 'WHERE course_id=?', c.id);
+      del(counts, 'daily_queue_v2', 'daily_queue_v2', 'WHERE course_id=?', c.id);
+      del(counts, 'exam_attempt', 'exam_attempt', 'WHERE course_id=?', c.id);
+      del(counts, 'outline', 'outline', 'WHERE course_id=?', c.id);
+      del(counts, 'course_plan', 'course_plan', 'WHERE course_id=?', c.id);
+      del(counts, 'rejected_term', 'rejected_term', 'WHERE course_id=?', c.id);
+      del(counts, 'term', 'term', 'WHERE concept_id IN (SELECT id FROM concept WHERE course_id=?)', c.id);
+      del(counts, 'card', 'card', 'WHERE course_id=?', c.id);
+      del(counts, 'concept', 'concept', 'WHERE course_id=?', c.id);
+      del(counts, 'relation', 'relation', 'WHERE course_id=?', c.id);
+      del(counts, 'diagram', 'diagram', 'WHERE course_id=?', c.id);
+      del(counts, 'page', 'page', 'WHERE file_id IN (SELECT id FROM source_file WHERE course_id=?)', c.id);
+      del(counts, 'source_file', 'source_file', 'WHERE course_id=?', c.id);
+      del(counts, 'course', 'course', 'WHERE id=?', c.id);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
     }
-    const id = uid('course_');
-    db.prepare('INSERT INTO course(id,profession_id,name,mode,state,created_at) VALUES(?,?,?,?,?,?)')
-      .run(id, prof.id, name, b?.mode === 'calc' ? 'calc' : 'concept', 'active', nowIso());
-    return { ok: true, id, name };
+
+    // 磁盘上的图片 / 原课件（清不掉也不算失败）
+    const removed = [];
+    try {
+      const base = process.env.MIAOMIAO_DATA || join(ROOT, 'data');
+      const imgDir = join(base, 'images', c.id);
+      if (existsSync(imgDir)) { rmSync(imgDir, { recursive: true, force: true }); removed.push('images'); }
+      for (const f of files) {
+        const pth = String(f.path || '');
+        if (pth && existsSync(pth) && /source_pdfs/i.test(pth)) {
+          rmSync(pth, { force: true });
+          removed.push('source_pdf');
+        }
+      }
+    } catch { /* 忽略 */ }
+
+    return { ok: true, name: c.name, deleted: counts, removed };
   },
 
-  // ---- AI 配置与精修 ----
   'GET /api/ai/config': async () => {
     const { getAiConfig, maskKey } = await import('./ai.mjs');
     const c = getAiConfig();

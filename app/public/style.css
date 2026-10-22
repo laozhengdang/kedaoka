@@ -746,3 +746,18 @@ body.plain-buttons .btn-tint {
 
 /* 开屏名言出处 */
 .splash-author { margin-top: 14px; font-size: 13px; color: var(--muted); letter-spacing: .06em; }
+
+/* 删除类按钮：单独一套，别和主题色混在一起 */
+button.btn-danger {
+  color: #b03a2e;
+  border-color: #e8b7ae;
+  background: #fdf3f1;
+}
+button.btn-danger:hover { background: #fae3de; border-color: #d98880; }
+button.danger {
+  background: #c0392b;
+  color: #fff;
+  border-color: #a93226;
+}
+button.danger:hover { background: #a93226; }
+button.danger:disabled { opacity: .45; cursor: not-allowed; }
