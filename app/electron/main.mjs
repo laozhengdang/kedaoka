@@ -471,6 +471,47 @@ app.whenReady().then(async () => {
         log.push('大文件通道出错: ' + e.message);
       }
 
+      // 关系显示：父卡打开后要列出全部子概念（包含 N 个）
+      try {
+        const relOut = await win.webContents.executeJavaScript(`(async () => {
+          const wait = (ms) => new Promise(r => setTimeout(r, ms));
+          const call = (m, p, b) => window.nativeApi.invoke(m, p, b);
+          const b = await call('GET', '/api/bootstrap');
+          const course = (b.courses || []).find((c) => c.cards > 0);
+          if (!course) return JSON.stringify({ ok: false, err: '没有课程' });
+
+          const br = await call('GET', '/api/browse/' + course.id);
+          let best = null;
+          for (const card of (br.cards || []).slice(0, 60)) {
+            const d = await call('GET', '/api/card/' + card.id);
+            const kids = (d.relations || []).filter((r) => r.kind === 'contains' && r.from_card === card.id);
+            if (!best || kids.length > best.kids) best = { id: card.id, front: card.front, kids: kids.length };
+          }
+          if (!best) return JSON.stringify({ ok: false, err: '没有卡片' });
+
+          location.hash = '#/card/' + best.id;
+          await wait(900);
+          const items = [...document.querySelectorAll('.rel-item')].map((x) => x.textContent.replace('×', '').trim());
+          const labels = [...document.querySelectorAll('.rel-kind')].map((x) => x.textContent);
+          return JSON.stringify({
+            ok: best.kids >= 2 && items.length >= best.kids,
+            front: best.front,
+            expectedKids: best.kids,
+            renderedItems: items.length,
+            containsLabels: labels.filter((x) => x === '包含').length,
+            sample: items.slice(0, 6),
+          });
+        })()`);
+        log.push('关系显示: ' + relOut);
+        try {
+          const { writeFileSync: wfR } = await import('node:fs');
+          const shotRels = await win.webContents.capturePage();
+          wfR(join(process.env.MIAOMIAO_DATA || '.', 'shot-rels.png'), shotRels.toPNG());
+        } catch { /* 截图失败忽略 */ }
+      } catch (e) {
+        log.push('关系显示出错: ' + e.message);
+      }
+
       // 删除课程：真的点一遍（建临时课 → 打开确认框 → 输入名字 → 删掉 → 验证没了）
       try {
         const del = await win.webContents.executeJavaScript(`(async () => {

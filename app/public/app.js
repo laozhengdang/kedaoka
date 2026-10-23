@@ -1155,12 +1155,15 @@ function renderCard() {
       <div class="term">${esc(c.front)}</div>
       <div class="meta">${c.chapter ? esc(c.chapter) + ' · ' : ''}第 ${c.source_page} 页 · ${stars(c.importance)}</div>
       <div class="answer"><div class="label">课件原文</div>${esc(c.back || '（这一页没有抽到上下文）')}</div>
+      <div id="revRels"></div>
       <div id="revDia"></div>
       ${c.image_path ? `<div class="cardimg"><img src="${imgUrl(c.image_path)}" data-card-id="${c.id}" alt="配图" loading="lazy"></div>` : ''}
       <div class="row" style="justify-content:center;margin-top:26px">
         <button class="primary" id="btnNext">下一张 <span class="kbd">空格</span></button>
       </div>`;
     $('#btnNext').onclick = nextCard;
+    // 名词解释下面挂上「包含哪些子概念 / 属于哪个大类」，点一下能看那张卡的释义
+    fillRelations($('#revRels'), c.id);
     // 这张卡挂了机制图就画在释义下面（最多两张，别把屏幕占满）
     const shelf = $('#revDia');
     for (const dg of (c.diagrams || []).slice(0, 2)) {
@@ -2264,12 +2267,32 @@ async function viewGraph(id) {
     </div>
     <p class="sub">按课件的真实章节结构生成。点任意名词跳到它的卡片。</p>
     <div class="tree" id="tree"></div>
-    <h2>包含关系</h2>
+    <h2>包含关系
+      <button id="btnRebuildRel" class="small ghost" style="margin-left:10px"
+        title="按课件原文重新算一遍「A 包括 B、C」这种关系，不会动卡片">重算关系</button>
+    </h2>
     <div id="edges"></div>`;
   m.appendChild(w);
 
   w.querySelector('[data-t="today"]').onclick = () => { location.hash = `#/course/${id}`; };
   w.querySelector('[data-t="repo"]').onclick = () => { location.hash = `#/browse/${id}`; };
+
+  const rbRel = w.querySelector('#btnRebuildRel');
+  if (rbRel) {
+    rbRel.onclick = async () => {
+      rbRel.disabled = true;
+      rbRel.textContent = '重算中…';
+      try {
+        const r = await api('POST', `/api/relations/rebuild/${id}`, {});
+        toast(`重算完成：删掉旧关系 ${r.removed || 0} 条，新增 ${r.added || 0} 条，现在共 ${r.total || 0} 条`);
+        await viewGraph(id);
+      } catch (e) {
+        toast('重算失败：' + (e.message || e));
+        rbRel.disabled = false;
+        rbRel.textContent = '重算关系';
+      }
+    };
+  }
 
   const tree = w.querySelector('#tree');
   const chapters = d.chapters || [];
@@ -2460,7 +2483,7 @@ async function viewCard(id) {
       ${d.samePage.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">同一页的其他概念</div>
         ${d.samePage.map((x) => `<a data-go="${x.id}">${esc(x.front)}</a>`).join(' · ')}</div>` : ''}
       ${d.relations.length ? `<div class="rel"><div class="sub" style="margin-bottom:4px">相关概念（点 × 可删除）</div>
-        ${d.relations.map((r) => `<span class="rel-item"><a data-go="${r.from_card === c.id ? r.to_card : r.from_card}">${esc(r.from_card === c.id ? r.to_front : r.from_front)}</a><span class="rel-x" data-rel="${r.rel_id || r.id}" title="删除这条关联">×</span></span>`).join(' ')}</div>` : ''}
+        ${d.relations.map((r) => `<span class="rel-item">${r.kind === 'contains' ? `<span class="rel-kind">${r.from_card === c.id ? '包含' : '属于'}</span>` : ''}<a data-go="${r.from_card === c.id ? r.to_card : r.from_card}">${esc(r.from_card === c.id ? r.to_front : r.from_front)}</a><span class="rel-x" data-rel="${r.rel_id || r.id}" title="删除这条关联">×</span></span>`).join(' ')}</div>` : ''}
       <div class="src">出处：${d.source && d.source.chapter ? esc(d.source.chapter) + ' · ' : ''}第 ${c.source_page} 页${d.source && d.source.fileName ? ' · ' + esc(d.source.fileName) : ''} · origin=${c.origin}</div>
       <div class="row" style="margin-top:18px">
         <button id="btnEdit" class="small">修改文字</button>
@@ -3430,4 +3453,58 @@ async function confirmDeleteCourse(courseId, courseName, cardCount) {
       go.textContent = '确认删除';
     }
   };
+}
+
+
+// 小窗看另一张卡的释义（复习中途不打断、不跳页）
+async function peekCard(cardId) {
+  if (!cardId) return;
+  try {
+    const d = await api('GET', `/api/card/${cardId}`);
+    const c = d.card;
+    const box = el('div', 'modal');
+    box.innerHTML = `
+      <div class="modal-box" style="width:620px">
+        <h3>${esc(c.front)}</h3>
+        <p class="sub">${stars(c.importance)} · 第 ${c.source_page} 页</p>
+        <div class="answer" style="margin-top:10px"><div class="label">课件原文</div>${esc(c.back || '（没有释义）')}</div>
+        <div class="row" style="margin-top:14px;justify-content:flex-end">
+          <button id="peekOpen" class="small">打开这张卡</button>
+          <button id="peekClose" class="ghost">关闭</button>
+        </div>
+      </div>`;
+    document.body.appendChild(box);
+    box.querySelector('#peekClose').onclick = () => box.remove();
+    box.querySelector('#peekOpen').onclick = () => { box.remove(); location.hash = `#/card/${c.id}`; };
+    box.addEventListener('click', (e) => { if (e.target === box) box.remove(); });
+  } catch (e) { toast('打不开这张卡：' + (e.message || e)); }
+}
+
+// 复习背面：显示「包含」的子概念 / 「属于」的大类
+async function fillRelations(holder, cardId) {
+  if (!holder) return;
+  let d;
+  try { d = await api('GET', `/api/card/${cardId}`); } catch { return; }
+  const rels = d.relations || [];
+  const kids = rels.filter((r) => r.kind === 'contains' && r.from_card === cardId)
+    .map((r) => ({ id: r.to_card, front: r.to_front }));
+  const parents = rels.filter((r) => r.kind === 'contains' && r.to_card === cardId)
+    .map((r) => ({ id: r.from_card, front: r.from_front }));
+  if (!kids.length && !parents.length) return;
+
+  const block = el('div', 'rev-rels');
+  const line = (label, list) => {
+    const row = el('div', 'rel-line');
+    const tag = el('span', 'rel-tag', label);
+    row.appendChild(tag);
+    for (const item of list) {
+      const chip = el('button', 'rel-chip', item.front);
+      chip.onclick = () => peekCard(item.id);
+      row.appendChild(chip);
+    }
+    block.appendChild(row);
+  };
+  if (kids.length) line(`包含 ${kids.length} 个`, kids);
+  if (parents.length) line('属于', parents);
+  holder.appendChild(block);
 }

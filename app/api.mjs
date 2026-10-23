@@ -619,6 +619,96 @@ const handlers = {
     return { ok: true };
   },
 
+  // 重算「包含」关系（不重新导入课件，只按已有页面文字和卡片名重算）
+  'POST /api/relations/rebuild/:id': (p) => {
+    const courseId = p.id;
+    const course = db.prepare('SELECT id, name FROM course WHERE id=?').get(courseId);
+    if (!course) throw new Error('课程不存在');
+
+    const cards = db.prepare(
+      'SELECT id, concept_id, front, source_page, file_id FROM card WHERE course_id=?'
+    ).all(courseId);
+    if (!cards.length) return { ok: true, relations: 0, note: '这门课还没有卡片' };
+
+    const pages = db.prepare(`
+      SELECT pg.page_no, pg.text, pg.file_id
+      FROM page pg JOIN source_file sf ON sf.id = pg.file_id
+      WHERE sf.course_id=? ORDER BY pg.file_id, pg.page_no`).all(courseId);
+
+    const KEYWORDS = ['包括', '分为', '可分', '有以下', '主要有', '种类有', '可分为', '分成', '又分',
+      '有下列', '常见类型', '类型有', '有哪几种', '几种类型', '分类', '归纳为', '概括为', '其类型'];
+
+    // 每页有哪些卡
+    const byPage = new Map();
+    for (const c of cards) {
+      const k = `${c.file_id}#${c.source_page}`;
+      if (!byPage.has(k)) byPage.set(k, []);
+      byPage.get(k).push(c);
+    }
+    const fronts = cards.map((c) => c.front).sort((a, b) => b.length - a.length);
+
+    const want = new Set();
+    const link = (parent, child) => {
+      if (!parent || !child || parent.id === child.id) return;
+      want.add(`${parent.concept_id}|${child.concept_id}`);
+    };
+
+    const hubs = [];
+    for (const pg of pages) {
+      const key = `${pg.file_id}#${pg.page_no}`;
+      const pageCards = byPage.get(key) || [];
+      if (!pageCards.length) continue;
+      const joined = String(pg.text || '').replace(/\s+/g, '');
+      const parentCard = pageCards[0];
+
+      for (const kw of KEYWORDS) {
+        const pos = joined.indexOf(kw);
+        if (pos < 0) continue;
+        const head = joined.slice(0, pos);
+        const tail = joined.slice(pos + kw.length, pos + kw.length + 120).split(/[。；;]/)[0];
+
+        // 父：触发词前最近出现的卡名（没有就用本页第一张卡）
+        let parent = null;
+        let bestIdx = -1;
+        for (const f of fronts) {
+          const idx = head.lastIndexOf(f);
+          if (idx > bestIdx) { bestIdx = idx; parent = pageCards.find((c) => c.front === f) || null; }
+        }
+        if (!parent) parent = parentCard;
+
+        // 子：触发词后出现的卡名（全课程范围，PPT 里子概念常在后几页标题）
+        const kids = [];
+        for (const f of fronts) {
+          const idx = tail.indexOf(f);
+          if (idx < 0) continue;
+          const card = cards.find((c) => c.front === f);
+          if (card) kids.push({ idx, card });
+        }
+        kids.sort((a, b) => a.idx - b.idx);
+        const valid = kids.map((k) => k.card).filter((c) => c.id !== parent.id).slice(0, 12);
+        for (const k of valid) link(parent, k);
+      }
+    }
+
+    db.exec('BEGIN');
+    let removed = 0;
+    try {
+      removed = db.prepare("DELETE FROM relation WHERE course_id=? AND kind='contains'").run(courseId).changes;
+      const ins = db.prepare('INSERT OR IGNORE INTO relation(course_id,from_concept,to_concept,kind) VALUES(?,?,?,?)');
+      for (const pair of want) {
+        const [from, to] = pair.split('|');
+        if (from && to) ins.run(courseId, from, to, 'contains');
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+
+    const total = db.prepare("SELECT count(*) n FROM relation WHERE course_id=? AND kind='contains'").get(courseId).n;
+    return { ok: true, removed, added: want.size, total };
+  },
+
   'POST /api/relation/add': (p, b) => {
     const fromCard = String(b.from || '');
     const toCard = String(b.to || '');

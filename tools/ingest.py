@@ -623,14 +623,18 @@ def clean_page_text(lines):
     return "\n".join(out)
 
 
-REL_KEYS = ("包括", "分为", "可分", "有以下", "主要有", "种类有", "可分为", "分成", "又分")
+REL_KEYS = ("包括", "分为", "可分", "有以下", "主要有", "种类有", "可分为", "分成", "又分",
+            "可分为下列", "有下列", "常见类型", "类型有", "可分为以下", "有哪几种", "几种类型",
+            "分类", "包括以下", "主要有以下", "归纳为", "概括为", "其类型")
 
 
 def build_relations(conn, course_id, page_cache, page_main_term):
-    """从"X 包括 A、B、C"这类句式抽包含关系。
+    """从「X 包括 A、B、C」这类句子抽包含关系。
 
-    上位概念不用猜——直接用这一页的"主术语"（字号最大的红字），
-    因为课件里这种列举句几乎都出现在"该页主题"下面。
+    两条路：
+      1) 同一页里有触发词 → 触发词前面最近的一个已知概念当父，后面出现的已知概念当子
+      2) 列举页 → 接下来 1~3 页的页标题（如果也是概念）当子（PPT 常见排版：
+         一页写「坏死的类型」，后面每页讲一种坏死）
     """
     pairs = conn.execute(
         "SELECT t.text, c.id FROM term t JOIN concept c ON c.id=t.concept_id "
@@ -640,37 +644,60 @@ def build_relations(conn, course_id, page_cache, page_main_term):
     if not term2concept:
         return 0
 
+    # 长词优先，避免「坏死」抢在「凝固性坏死」前面匹配
+    terms_sorted = sorted(term2concept, key=len, reverse=True)
     existing = set()
     added = 0
-    for pno, lines in page_cache.items():
-        parent = page_main_term.get(pno)
-        if not parent or parent not in term2concept:
-            continue
+
+    def link(parent, child):
+        nonlocal added
+        if not parent or not child or parent == child:
+            return
+        pc, cc = term2concept.get(parent), term2concept.get(child)
+        if not pc or not cc or pc == cc:
+            return
+        key = (pc, cc)
+        if key in existing:
+            return
+        existing.add(key)
+        conn.execute(
+            "INSERT INTO relation(course_id,from_concept,to_concept,kind) VALUES(?,?,?,?)",
+            (course_id, pc, cc, "contains"),
+        )
+        added += 1
+
+    for pno in sorted(page_cache):
+        lines = page_cache[pno]
         joined = "".join(ln["text"] for ln in lines)
-        parent_c = term2concept[parent]
+        page_title = page_main_term.get(pno)
         for kw in REL_KEYS:
-            start = 0
-            while True:
-                pos = joined.find(kw, start)
-                if pos < 0:
-                    break
-                start = pos + len(kw)
-                seg = joined[start:start + 90]
-                seg = re.split(r"[。；;]", seg)[0]
-                kids = [norm(x) for x in re.split(r"[、，,\s]+", seg)]
-                kids = [k for k in kids if k in term2concept and k != parent]
-                if len(kids) < 2:
+            pos = joined.find(kw)
+            if pos < 0:
+                continue
+            head = joined[:pos]
+            # 父：触发词前面最近出现的已知概念（没有就用本页标题）
+            parent = None
+            best = -1
+            for cand in terms_sorted:
+                idx = head.rfind(cand)
+                if idx > best:
+                    best, parent = idx, cand
+            if parent is None:
+                parent = page_title if page_title in term2concept else None
+            if parent is None:
+                continue
+            # 子：触发词后面 120 字内出现的已知概念
+            tail = joined[pos + len(kw):pos + len(kw) + 120]
+            tail = re.split(r"[。；;]", tail)[0]
+            kids = []
+            for cand in terms_sorted:
+                if cand == parent or cand not in tail:
                     continue
-                for k in kids[:8]:
-                    key = (parent_c, term2concept[k])
-                    if key in existing:
-                        continue
-                    existing.add(key)
-                    conn.execute(
-                        "INSERT INTO relation(course_id,from_concept,to_concept,kind) VALUES(?,?,?,?)",
-                        (course_id, key[0], key[1], "contains"),
-                    )
-                    added += 1
+                kids.append((tail.find(cand), cand))
+            kids = [k for _, k in sorted(kids)]
+            for k in kids[:12]:
+                link(parent, k)
+
     return added
 
 

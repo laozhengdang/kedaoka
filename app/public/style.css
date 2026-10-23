@@ -761,3 +761,18 @@ button.danger {
 }
 button.danger:hover { background: #a93226; }
 button.danger:disabled { opacity: .45; cursor: not-allowed; }
+
+/* 复习背面：包含 / 属于 */
+.rev-rels { margin: 14px auto 0; max-width: 640px; display: flex; flex-direction: column; gap: 8px; }
+.rel-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rel-tag {
+  font-size: 12px; color: #6b7280; background: #f1f3f5;
+  border-radius: 4px; padding: 2px 8px; margin-right: 2px;
+}
+.rel-chip {
+  font-size: 13px; padding: 3px 10px; border-radius: 14px;
+  border: 1px solid #d8dee9; background: #fbfcfe; color: #1f3a93;
+  cursor: pointer;
+}
+.rel-chip:hover { background: #eef3ff; border-color: #9db4e8; }
+.rel-kind { font-size: 11px; color: #8a94a6; margin: 0 2px 0 4px; }
