@@ -406,6 +406,13 @@ window.addEventListener('hashchange', route);
 window.addEventListener('DOMContentLoaded', boot);
 
 async function boot() {
+  // 版本号：桌面版从主进程拿；拿不到就写 1
+  try {
+    if (window.nativeApi && window.nativeApi.appVersion) STATE.appVersion = await window.nativeApi.appVersion();
+  } catch { /* 忽略 */ }
+  STATE.appVersion = STATE.appVersion || '1';
+  setTimeout(() => silentUpdateCheck(), 1500);
+
   const b = await api('GET', '/api/bootstrap');
   STATE.profile = b.profile;
   STATE.courses = b.courses;
@@ -691,7 +698,19 @@ function bindSearch() {
 function showAbout() {
   const b = $('#aboutBody');
   b.innerHTML = `
-    <p><b>老郑荡的妙妙小工具</b> · v1</p>
+    <p><b>老郑荡的妙妙小工具</b> · v${esc(STATE.appVersion || '?')}</p>
+    <div class="upd-box">
+      <div class="upd-row">
+        <span class="upd-cur">当前版本 v${esc(STATE.appVersion || '?')}</span>
+        <button id="btnCheckUpdate" class="small">检查更新</button>
+      </div>
+      <div class="upd-msg" id="updMsg">还没检查</div>
+      <div class="upd-actions hidden" id="updActions">
+        <button id="btnUpdateNow" class="primary small">下载并自动安装</button>
+        <button id="btnUpdatePage" class="ghost small">打开发布页</button>
+      </div>
+      <div class="upd-bar hidden" id="updBarWrap"><div class="upd-bar-in" id="updBar"></div></div>
+    </div>
     <p class="sub">界面版本：${esc(document.lastModified || '未知')}　（这个时间要跟源码一致，否则就是没打包成功）</p>
     <p class="sub">课件 → 知识卡 → 间隔重复复习。所有数据都在本机，不上传。</p>
     <p class="sub">GitHub：github.com/laozhengdang（开源版是空白工具，课程数据不在仓库里）</p>
@@ -699,6 +718,7 @@ function showAbout() {
     <p class="sub">许可：个人自用，未附许可证文件；引用第三方：Electron(MIT)、PyMuPDF(AGPL)、MuPDF(AGPL)</p>
     <p class="sub">名言库 / 启动图：尚未实现</p>`;
   $('#aboutModal').classList.remove('hidden');
+  bindUpdater($('#aboutBody'));
 }
 
 // ---------- 选文件 / 拖文件 ----------
@@ -3507,4 +3527,94 @@ async function fillRelations(holder, cardId) {
   if (kids.length) line(`包含 ${kids.length} 个`, kids);
   if (parents.length) line('属于', parents);
   holder.appendChild(block);
+}
+
+
+// ---------------- 检查更新 ----------------
+let UPDATE_INFO = null;
+
+async function bindUpdater(box) {
+  const btn = box.querySelector('#btnCheckUpdate');
+  const msg = box.querySelector('#updMsg');
+  const actions = box.querySelector('#updActions');
+  const barWrap = box.querySelector('#updBarWrap');
+  const bar = box.querySelector('#updBar');
+  if (!btn) return;
+  if (!window.nativeApi || !window.nativeApi.checkUpdate) {
+    msg.textContent = '网页版不能自动更新，请到 GitHub 下载新版本';
+    btn.disabled = true;
+    return;
+  }
+
+  btn.onclick = async () => {
+    btn.disabled = true;
+    msg.textContent = '正在连 GitHub…';
+    actions.classList.add('hidden');
+    try {
+      const r = await window.nativeApi.checkUpdate();
+      UPDATE_INFO = r;
+      if (!r.ok) {
+        msg.textContent = r.error || '检查失败';
+      } else if (!r.hasUpdate) {
+        msg.textContent = `已是最新版本（v${r.current}）`;
+      } else {
+        msg.textContent = `有新版本 v${r.latest}（当前 v${r.current}）`;
+        actions.classList.remove('hidden');
+      }
+    } catch (e) {
+      msg.textContent = '检查失败：' + (e.message || e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '再检查一次';
+    }
+  };
+
+  box.querySelector('#btnUpdatePage').onclick = () => {
+    if (UPDATE_INFO && UPDATE_INFO.url && window.nativeApi.openExternal) {
+      window.nativeApi.openExternal(UPDATE_INFO.url);
+    }
+  };
+
+  box.querySelector('#btnUpdateNow').onclick = async () => {
+    const info = UPDATE_INFO;
+    if (!info || !info.asset) return toast('这次发布没有 zip 附件，请去发布页下载');
+    const now = box.querySelector('#btnUpdateNow');
+    now.disabled = true;
+    barWrap.classList.remove('hidden');
+    msg.textContent = `开始下载 ${info.asset.name}（${Math.round(info.asset.size / 1048576)} MB）…`;
+    const off = window.nativeApi.onUpdateProgress((p) => {
+      bar.style.width = (p.pct || 0) + '%';
+      msg.textContent = `下载中 ${p.pct || 0}%（${Math.round((p.got || 0) / 1048576)} / ${Math.round((p.total || 0) / 1048576)} MB）`;
+    });
+    try {
+      const got = await window.nativeApi.downloadUpdate({ url: info.asset.url, name: info.asset.name });
+      off && off();
+      msg.textContent = `下载完成（${Math.round(got.size / 1048576)} MB），正在重启并替换…`;
+      await window.nativeApi.installUpdate({ file: got.file });
+    } catch (e) {
+      off && off();
+      msg.textContent = '下载失败：' + (e.message || e) + '　可以去发布页手动下载';
+      now.disabled = false;
+    }
+  };
+}
+
+// 启动时静默看一次（一天最多一次），有新版本就在首页顶部提示
+async function silentUpdateCheck() {
+  if (!window.nativeApi || !window.nativeApi.checkUpdate) return;
+  try {
+    const key = 'update_checked_at';
+    const last = Number(localStorage.getItem(key) || 0);
+    if (Date.now() - last < 24 * 3600 * 1000) return;
+    localStorage.setItem(key, String(Date.now()));
+    const r = await window.nativeApi.checkUpdate();
+    if (r && r.ok && r.hasUpdate) {
+      const tip = el('div', 'upd-toast');
+      tip.innerHTML = `有新版本 v${esc(r.latest)}（当前 v${esc(r.current)}）<button class="small" id="updGo">去更新</button><button class="ghost small" id="updLater">以后</button>`;
+      document.body.appendChild(tip);
+      tip.querySelector('#updGo').onclick = () => { tip.remove(); location.hash = '#/settings'; };
+      tip.querySelector('#updLater').onclick = () => tip.remove();
+      setTimeout(() => tip.remove(), 20000);
+    }
+  } catch { /* 静默失败 */ }
 }

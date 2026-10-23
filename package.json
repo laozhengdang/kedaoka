@@ -1,6 +1,6 @@
 {
   "name": "miaomiao-tools",
-  "version": "0.1.0",
+  "version": "0.9.7",
   "private": true,
   "description": "老郑荡的妙妙小工具 —— 兽医课程复习桌面工具",
   "main": "app/electron/main.mjs",

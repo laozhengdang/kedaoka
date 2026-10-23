@@ -645,7 +645,18 @@ const handlers = {
       if (!byPage.has(k)) byPage.set(k, []);
       byPage.get(k).push(c);
     }
-    const fronts = cards.map((c) => c.front).sort((a, b) => b.length - a.length);
+    // 泛词 / 版式残留不当概念
+    const GENERIC = new Set(['亚类', '称为', '类型', '分类', '包括', '分为', '主要', '常见', '各种',
+      '下列', '内容', '特点', '意义', '方法', '步骤', '作用', '概念', '定义', '概述', '小结', '举例',
+      '检测', '试验名称', '诊断', '治疗', '预防', '应用', '小结与思考']);
+    const badName = (f) => !f
+      || f.length < 2 || f.length > 14
+      || GENERIC.has(f)
+      || /[》〉」]|课件|等$|等等|如图|如表|见表|如下图/.test(f)
+      || /[、，,。；;：:]/.test(f);
+    const fronts = cards.map((c) => c.front)
+      .filter((f) => !badName(f))
+      .sort((a, b) => b.length - a.length);
 
     const want = new Set();
     const link = (parent, child) => {
@@ -667,12 +678,16 @@ const handlers = {
         const head = joined.slice(0, pos);
         const tail = joined.slice(pos + kw.length, pos + kw.length + 120).split(/[。；;]/)[0];
 
-        // 父：触发词前最近出现的卡名（没有就用本页第一张卡）
+        // 父：紧挨触发词前 30 字内的卡名；否则页面开头 60 字内的卡名；否则本页第一张卡
         let parent = null;
         let bestIdx = -1;
         for (const f of fronts) {
           const idx = head.lastIndexOf(f);
-          if (idx > bestIdx) { bestIdx = idx; parent = pageCards.find((c) => c.front === f) || null; }
+          if (idx < 0) continue;
+          const near = idx >= head.length - 30;
+          const titleish = idx < 60;
+          if (!near && !titleish) continue;
+          if (idx > bestIdx) { bestIdx = idx; parent = cards.find((c) => c.front === f) || null; }
         }
         if (!parent) parent = parentCard;
 
@@ -684,9 +699,15 @@ const handlers = {
           const card = cards.find((c) => c.front === f);
           if (card) kids.push({ idx, card });
         }
-        kids.sort((a, b) => a.idx - b.idx);
-        const valid = kids.map((k) => k.card).filter((c) => c.id !== parent.id).slice(0, 12);
-        for (const k of valid) link(parent, k);
+        kids.sort((a, b) => b.card.front.length - a.card.front.length || a.idx - b.idx);
+        const picked = [];
+        for (const k of kids) {
+          if (!k.card || k.card.id === parent.id) continue;
+          // 被更长的词包含的短词跳过（有「凝固性坏死」就不要「坏死」）
+          if (picked.some((x) => x.card.front.includes(k.card.front))) continue;
+          picked.push(k);
+        }
+        for (const k of picked.slice(0, 12)) link(parent, k.card);
       }
     }
 

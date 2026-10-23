@@ -186,6 +186,126 @@ ipcMain.handle('drop-file', async (_e, payload = {}) => {
   return file;
 });
 
+// ---------------- 检查更新（GitHub Releases） ----------------
+const REPO = 'laozhengdang/miaomiao-study';
+const GH_HEADERS = { Accept: 'application/vnd.github+json', 'User-Agent': 'miaomiao-study' };
+
+function cmpVersion(a, b) {
+  const pa = String(a || '0').replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = String(b || '0').replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+ipcMain.handle('app-version', async () => app.getVersion());
+
+ipcMain.handle('check-update', async () => {
+  const current = app.getVersion();
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: GH_HEADERS });
+    if (!res.ok) throw new Error(`GitHub 返回 ${res.status}`);
+    const rel = await res.json();
+    const latest = String(rel.tag_name || '').replace(/^v/i, '');
+    const asset = (rel.assets || []).find((a) => /\.zip$/i.test(a.name));
+    return {
+      ok: true,
+      current,
+      latest,
+      hasUpdate: cmpVersion(latest, current) > 0,
+      notes: String(rel.body || '').slice(0, 4000),
+      url: rel.html_url,
+      publishedAt: rel.published_at,
+      asset: asset ? { name: asset.name, size: asset.size, url: asset.browser_download_url } : null,
+    };
+  } catch (e) {
+    return { ok: false, current, error: `连不上 GitHub：${e.message}（国内可能需要代理）` };
+  }
+});
+
+// 下载新版本 zip 到临时目录，边下边报进度
+ipcMain.handle('download-update', async (e, payload = {}) => {
+  const { createWriteStream, mkdirSync, existsSync, statSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const os = await import('node:os');
+  const url = payload.url;
+  if (!url) throw new Error('没有下载地址');
+  const dir = join(os.tmpdir(), 'miaomiao-update');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, payload.name || 'update.zip');
+
+  const res = await fetch(url, { headers: { 'User-Agent': 'miaomiao-study' } });
+  if (!res.ok) throw new Error(`下载失败：HTTP ${res.status}`);
+  const total = Number(res.headers.get('content-length') || 0);
+  const stream = createWriteStream(file);
+  const reader = res.body.getReader();
+  let got = 0;
+  let lastTick = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      got += value.length;
+      await new Promise((resolve, reject) => {
+        if (stream.write(Buffer.from(value))) resolve();
+        else stream.once('drain', resolve);
+        stream.once('error', reject);
+      });
+      const now = Date.now();
+      if (now - lastTick > 300) {
+        lastTick = now;
+        e.sender.send('update-progress', { got, total, pct: total ? Math.round((got / total) * 100) : 0 });
+      }
+    }
+  } finally {
+    await new Promise((r) => stream.end(r));
+  }
+  const size = existsSync(file) ? statSync(file).size : 0;
+  e.sender.send('update-progress', { got: size, total: total || size, pct: 100, done: true });
+  return { ok: true, file, size };
+});
+
+// 用一个小脚本：等主程序退出 → 解压覆盖 → 重新启动
+ipcMain.handle('install-update', async (_e, payload = {}) => {
+  const { writeFileSync } = await import('node:fs');
+  const { join, dirname } = await import('node:path');
+  const os = await import('node:os');
+  if (!app.isPackaged) throw new Error('开发模式下不执行自动安装，请直接重新打包');
+  const zip = payload.file;
+  const installDir = dirname(app.getPath('exe'));
+  const exe = app.getPath('exe');
+  const script = join(os.tmpdir(), 'miaomiao-update', 'apply-update.ps1');
+  const pid = process.pid;
+  const body = `$ErrorActionPreference = 'Stop'
+$zip = '${zip.replace(/'/g, "''")}'
+$dir = '${installDir.replace(/'/g, "''")}'
+$exe = '${exe.replace(/'/g, "''")}'
+Write-Host 'waiting for app to exit...'
+for ($i = 0; $i -lt 60; $i++) {
+  $p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+  if (-not $p) { break }
+  Start-Sleep -Milliseconds 500
+}
+Start-Sleep -Milliseconds 800
+Write-Host 'extracting...'
+Expand-Archive -Path $zip -DestinationPath $dir -Force
+Remove-Item $zip -Force -ErrorAction SilentlyContinue
+Start-Process -FilePath $exe
+`;
+  writeFileSync(script, body, 'utf8');
+  const { spawn } = await import('node:child_process');
+  const child = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  child.unref();
+  setTimeout(() => app.quit(), 600);
+  return { ok: true, script };
+});
+
 // 首次运行（仅打包版）：桌面没有快捷方式就建一个
 async function ensureDesktopShortcut() {
   try {
@@ -469,6 +589,43 @@ app.whenReady().then(async () => {
         log.push('大文件通道: ' + big);
       } catch (e) {
         log.push('大文件通道出错: ' + e.message);
+      }
+
+      // 检查更新：能连 GitHub、版本号能读、比较结果正确
+      try {
+        const upd = await win.webContents.executeJavaScript(`(async () => {
+          const wait = (ms) => new Promise(r => setTimeout(r, ms));
+          const v = await window.nativeApi.appVersion();
+          const r = await window.nativeApi.checkUpdate();
+          // 顺便打开关于框，确认按钮在
+          location.hash = '#/settings';
+          await wait(700);
+          const aboutBtn = document.querySelector('#btnAbout');
+          if (aboutBtn) aboutBtn.click();
+          await wait(500);
+          const hasBtn = !!document.querySelector('#btnCheckUpdate');
+          if (hasBtn) {
+            document.querySelector('#btnCheckUpdate').click();
+            await wait(2500);   // 等 GitHub 返回
+          }
+          return JSON.stringify({
+            version: v,
+            ok: r.ok,
+            current: r.current,
+            latest: r.latest,
+            hasUpdate: r.hasUpdate,
+            aboutButtonPresent: hasBtn,
+            err: r.error || '',
+          });
+        })()`);
+        log.push('检查更新: ' + upd);
+        try {
+          const { writeFileSync: wfU } = await import('node:fs');
+          const shotUpd = await win.webContents.capturePage();
+          wfU(join(process.env.MIAOMIAO_DATA || '.', 'shot-update.png'), shotUpd.toPNG());
+        } catch { /* 截图失败忽略 */ }
+      } catch (e) {
+        log.push('检查更新出错: ' + e.message);
       }
 
       // 关系显示：父卡打开后要列出全部子概念（包含 N 个）

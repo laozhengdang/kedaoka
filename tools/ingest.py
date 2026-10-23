@@ -640,7 +640,11 @@ def build_relations(conn, course_id, page_cache, page_main_term):
         "SELECT t.text, c.id FROM term t JOIN concept c ON c.id=t.concept_id "
         "WHERE c.course_id=? AND t.kind='preferred'", (course_id,)
     ).fetchall()
-    term2concept = {t: cid for t, cid in pairs}
+    bad = re.compile(r"[》〉」]|课件|等$|如图|如表|见表|如下图")
+    term2concept = {
+        t: cid for t, cid in pairs
+        if t and 2 <= len(t) <= 14 and not bad.search(t) and not re.search(r"[、，,。；;：:]", t)
+    }
     if not term2concept:
         return 0
 

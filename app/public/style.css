@@ -776,3 +776,19 @@ button.danger:disabled { opacity: .45; cursor: not-allowed; }
 }
 .rel-chip:hover { background: #eef3ff; border-color: #9db4e8; }
 .rel-kind { font-size: 11px; color: #8a94a6; margin: 0 2px 0 4px; }
+
+/* 检查更新 */
+.upd-box { margin: 10px 0 8px; padding: 10px 12px; border: 1px solid #e3e8ef; border-radius: 8px; background: #fbfcfe; }
+.upd-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.upd-cur { font-size: 13px; color: #444; }
+.upd-msg { font-size: 13px; color: #666; margin-top: 8px; }
+.upd-actions { margin-top: 10px; display: flex; gap: 8px; }
+.upd-bar { height: 6px; background: #e6ebf2; border-radius: 4px; margin-top: 10px; overflow: hidden; }
+.upd-bar-in { height: 100%; width: 0; background: #2b5cff; transition: width .2s; }
+.upd-toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  background: #1f2937; color: #fff; padding: 10px 14px; border-radius: 10px;
+  font-size: 13px; display: flex; align-items: center; gap: 10px; z-index: 9999;
+  box-shadow: 0 6px 24px rgba(0,0,0,.2);
+}
+.upd-toast button { border-color: rgba(255,255,255,.4); color: #fff; background: rgba(255,255,255,.12); }

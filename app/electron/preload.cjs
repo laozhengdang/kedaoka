@@ -32,5 +32,15 @@ contextBridge.exposeInMainWorld('nativeApi', {
   readText: (p) => ipcRenderer.invoke('read-text', p),
   saveText: (filename, text) => ipcRenderer.invoke('save-text', { filename, text }),
   backupDb: () => ipcRenderer.invoke('backup-db'),
+  // 检查更新 / 下载 / 安装
+  appVersion: () => ipcRenderer.invoke('app-version'),
+  checkUpdate: () => ipcRenderer.invoke('check-update'),
+  downloadUpdate: (payload) => ipcRenderer.invoke('download-update', payload),
+  installUpdate: (payload) => ipcRenderer.invoke('install-update', payload),
+  onUpdateProgress: (cb) => {
+    const h = (_e, data) => cb(data);
+    ipcRenderer.on('update-progress', h);
+    return () => ipcRenderer.removeListener('update-progress', h);
+  },
   isDesktop: true,
 });
