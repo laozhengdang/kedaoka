@@ -792,3 +792,10 @@ button.danger:disabled { opacity: .45; cursor: not-allowed; }
   box-shadow: 0 6px 24px rgba(0,0,0,.2);
 }
 .upd-toast button { border-color: rgba(255,255,255,.4); color: #fff; background: rgba(255,255,255,.12); }
+
+.splash-slogan {
+  margin-top: 10px;
+  font-size: 13px;
+  letter-spacing: .28em;
+  color: #9aa3b2;
+}

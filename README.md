@@ -2,6 +2,8 @@
 
 **把老师的课件（PDF / PPTX），变成能考的知识卡。**
 
+> ### 课件进，考点出。
+
 Windows 桌面应用 · 完全离线可用 · 数据全在本机 · 开源（AGPL-3.0）
 
 ### 📥 [**点这里下载（Windows 免安装，解压双击即用）**](https://github.com/laozhengdang/kedaoka/releases/latest)
@@ -169,7 +171,7 @@ AI 判断"这词要不要留"时偏保守，刷掉的词进「待审」而不是
 ### 拿到成品
 
 到 [**Releases**](https://github.com/laozhengdang/kedaoka/releases/latest) 下载
-`kedaoka-v1.0.0.zip`（178 MB），解压后双击 `课到卡.exe`。
+`kedaoka-v1.0.1.zip`（178 MB），解压后双击 `课到卡.exe`。
 
 **不需要装 Python、不需要装 Node** —— Electron 引擎、Python 3.12、PyMuPDF 全部打包在里面。
 

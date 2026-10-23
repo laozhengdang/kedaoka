@@ -712,7 +712,7 @@ function showAbout() {
       <div class="upd-bar hidden" id="updBarWrap"><div class="upd-bar-in" id="updBar"></div></div>
     </div>
     <p class="sub">界面版本：${esc(document.lastModified || '未知')}　（这个时间要跟源码一致，否则就是没打包成功）</p>
-    <p class="sub">课件 → 知识卡 → 间隔重复复习。所有数据都在本机，不上传。</p>
+    <p class="sub"><b>课件进，考点出。</b>课件 → 知识卡 → 间隔重复复习。所有数据都在本机，不上传。</p>
     <p class="sub">GitHub：github.com/laozhengdang（开源版是空白工具，课程数据不在仓库里）</p>
     <p class="sub">技术：Electron + node:sqlite + Python(PyMuPDF) + 任意 OpenAI 兼容接口</p>
     <p class="sub">许可：个人自用，未附许可证文件；引用第三方：Electron(MIT)、PyMuPDF(AGPL)、MuPDF(AGPL)</p>

@@ -409,6 +409,7 @@ app.whenReady().then(async () => {
         return JSON.stringify({
           text: (document.querySelector('#splashQuote') || {}).textContent || '',
           by: (document.querySelector('#splashAuthor') || {}).textContent || '',
+          slogan: (document.querySelector('.splash-slogan') || {}).textContent || '',
           visible: !!box && !box.classList.contains('hidden'),
         });
       })()`);
