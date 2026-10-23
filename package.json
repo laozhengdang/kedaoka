@@ -1,8 +1,8 @@
 {
-  "name": "miaomiao-tools",
-  "version": "0.9.7",
+  "name": "kedaoka",
+  "version": "1.0.0",
   "private": true,
-  "description": "老郑荡的妙妙小工具 —— 兽医课程复习桌面工具",
+  "description": "课到卡 —— 把课件变成能考的知识卡（兽医课程复习桌面工具）",
   "main": "app/electron/main.mjs",
   "scripts": {
     "start": "electron .",
@@ -12,5 +12,6 @@
   "devDependencies": {
     "electron": "^44.9.0",
     "electron-builder": "^26.15.3"
-  }
+  },
+  "productName": "课到卡"
 }

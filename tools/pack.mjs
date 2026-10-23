@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
-const OUT = join(ROOT, 'build', '老郑荡的妙妙小工具');
+const OUT = join(ROOT, 'build', '课到卡');
 const APPDIR = join(OUT, 'resources', 'app');
 
 const say = (s) => console.log(s);
@@ -15,8 +15,8 @@ const fail = (s) => { console.error('[×] ' + s); process.exitCode = 1; };
 say('打包检查');
 say('='.repeat(50));
 
-if (!existsSync(join(OUT, '老郑荡的妙妙小工具.exe'))) {
-  fail(`没找到 ${OUT}\\老郑荡的妙妙小工具.exe（先把 Electron 发行版放进去）`);
+if (!existsSync(join(OUT, '课到卡.exe'))) {
+  fail(`没找到 ${OUT}\\课到卡.exe（先把 Electron 发行版放进去）`);
   process.exit(1);
 }
 
@@ -76,6 +76,6 @@ say(`   打包 app.js：${dstJs.toLocaleString()}`);
 if (dstJs < srcJs) { fail('打包目录比源码旧，复制没生效'); ok = false; }
 
 say('='.repeat(50));
-if (ok) say('打包完成，可以启动：build\\老郑荡的妙妙小工具\\老郑荡的妙妙小工具.exe');
+if (ok) say('打包完成，可以启动：build\\课到卡\\课到卡.exe');
 else say('打包有问题，看上面 [×] 的行');
 process.exit(ok ? 0 : 1);

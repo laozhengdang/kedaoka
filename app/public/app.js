@@ -698,7 +698,7 @@ function bindSearch() {
 function showAbout() {
   const b = $('#aboutBody');
   b.innerHTML = `
-    <p><b>老郑荡的妙妙小工具</b> · v${esc(STATE.appVersion || '?')}</p>
+    <p><b>课到卡</b> · v${esc(STATE.appVersion || '?')}</p>
     <div class="upd-box">
       <div class="upd-row">
         <span class="upd-cur">当前版本 v${esc(STATE.appVersion || '?')}</span>

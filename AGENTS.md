@@ -22,10 +22,10 @@
 如果用户只是「想用」，**不要**去装 Node/Python，直接让他下载：
 
 ```
-https://github.com/laozhengdang/miaomiao-study/releases/latest
+https://github.com/laozhengdang/kedaoka/releases/latest
 ```
 
-压缩包里有 `老郑荡的妙妙小工具.exe`、Electron 引擎、内置 Python 3.12 + PyMuPDF。
+压缩包里有 `课到卡.exe`、Electron 引擎、内置 Python 3.12 + PyMuPDF。
 解压双击即可。**这一步不需要你安装任何东西。**
 
 只有用户明确要求「改代码」或「从源码跑」时，才继续往下。
@@ -48,8 +48,8 @@ https://github.com/laozhengdang/miaomiao-study/releases/latest
 ### 步骤
 
 ```bash
-git clone https://github.com/laozhengdang/miaomiao-study.git
-cd miaomiao-study
+git clone https://github.com/laozhengdang/kedaoka.git
+cd kedaoka
 
 npm install                      # 会下载 Electron（约 100MB）
 pip install pymupdf

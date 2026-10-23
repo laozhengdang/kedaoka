@@ -2,21 +2,21 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 echo.
-echo  老郑荡的妙妙小工具 - 创建桌面快捷方式
+echo  课到卡 - 创建桌面快捷方式
 echo  ======================================
 echo.
 
-if exist "%~dp0老郑荡的妙妙小工具.exe" goto here
-if exist "%~dp0build\老郑荡的妙妙小工具\老郑荡的妙妙小工具.exe" goto root
+if exist "%~dp0课到卡.exe" goto here
+if exist "%~dp0build\课到卡\课到卡.exe" goto root
 
-echo  [x] 当前目录没有 老郑荡的妙妙小工具.exe
+echo  [x] 当前目录没有 课到卡.exe
 echo      请把这个 bat 放到程序目录（和 exe 同一个文件夹）再运行。
 echo.
 pause
 exit /b 1
 
 :here
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0make_shortcut.ps1" -ExePath "%~dp0老郑荡的妙妙小工具.exe"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0make_shortcut.ps1" -ExePath "%~dp0课到卡.exe"
 if errorlevel 1 goto fail
 goto end
 

@@ -30,7 +30,7 @@ async function createWindow() {
     minWidth: 880,
     minHeight: 600,
     backgroundColor: '#fbfbf9',
-    title: '老郑荡的妙妙小工具',
+    title: '课到卡',
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(HERE, 'preload.cjs'),
@@ -79,7 +79,7 @@ ipcMain.handle('backup-db', async () => {
   const src = join(process.env.MIAOMIAO_DATA || '.', 'db', 'app.db');
   const stamp = new Date().toISOString().slice(0, 10);
   const r = await dialog.showSaveDialog(win || undefined, {
-    defaultPath: `妙妙小工具-备份-${stamp}.db`,
+    defaultPath: `课到卡-备份-${stamp}.db`,
     filters: [{ name: '数据库', extensions: ['db'] }],
   });
   if (r.canceled || !r.filePath) return { ok: false };
@@ -187,8 +187,8 @@ ipcMain.handle('drop-file', async (_e, payload = {}) => {
 });
 
 // ---------------- 检查更新（GitHub Releases） ----------------
-const REPO = 'laozhengdang/miaomiao-study';
-const GH_HEADERS = { Accept: 'application/vnd.github+json', 'User-Agent': 'miaomiao-study' };
+const REPO = 'laozhengdang/kedaoka';
+const GH_HEADERS = { Accept: 'application/vnd.github+json', 'User-Agent': 'kedaoka' };
 
 function cmpVersion(a, b) {
   const pa = String(a || '0').replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0);
@@ -236,7 +236,7 @@ ipcMain.handle('download-update', async (e, payload = {}) => {
   mkdirSync(dir, { recursive: true });
   const file = join(dir, payload.name || 'update.zip');
 
-  const res = await fetch(url, { headers: { 'User-Agent': 'miaomiao-study' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'kedaoka' } });
   if (!res.ok) throw new Error(`下载失败：HTTP ${res.status}`);
   const total = Number(res.headers.get('content-length') || 0);
   const stream = createWriteStream(file);
@@ -306,6 +306,28 @@ Start-Process -FilePath $exe
   return { ok: true, script };
 });
 
+// 从旧名字的目录搬数据（改名后第一次启动，别让用户的卡片丢了）
+async function migrateOldData() {
+  try {
+    if (!app.isPackaged) return;
+    const { existsSync, cpSync } = await import('node:fs');
+    const { join, dirname } = await import('node:path');
+    const dataDir = process.env.MIAOMIAO_DATA;
+    if (!dataDir || existsSync(join(dataDir, 'db', 'app.db'))) return;   // 已有数据，不动
+    const parent = dirname(dirname(dataDir));
+    const candidates = ['老郑荡的妙妙小工具', '妙妙小工具', 'miaomiao-study'];
+    for (const oldName of candidates) {
+      const oldData = join(parent, oldName, 'data');
+      if (!existsSync(join(oldData, 'db', 'app.db'))) continue;
+      cpSync(oldData, dataDir, { recursive: true });
+      console.log('[migrate] 已从旧目录搬来数据:', oldData);
+      return;
+    }
+  } catch (e) {
+    console.log('[migrate] 搬数据失败（不影响使用）:', e.message);
+  }
+}
+
 // 首次运行（仅打包版）：桌面没有快捷方式就建一个
 async function ensureDesktopShortcut() {
   try {
@@ -315,7 +337,7 @@ async function ensureDesktopShortcut() {
     const os = await import('node:os');
     const pathMod = await import('node:path');
     const desktop = pathMod.join(os.homedir(), 'Desktop');
-    const lnk = pathMod.join(desktop, '老郑荡的妙妙小工具.lnk');
+    const lnk = pathMod.join(desktop, '课到卡.lnk');
     if (existsSync(lnk)) return;
     shell.writeShortcutLink(lnk, 'create', {
       target: process.execPath,
@@ -351,6 +373,7 @@ app.whenReady().then(async () => {
     return;
   }
 
+  await migrateOldData();
   await ensureDesktopShortcut();
 
   if (UITEST) {

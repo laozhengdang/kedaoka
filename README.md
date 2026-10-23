@@ -1,10 +1,10 @@
-# 老郑荡的妙妙小工具
+# 课到卡
 
 **把老师的课件（PDF / PPTX），变成能考的知识卡。**
 
 Windows 桌面应用 · 完全离线可用 · 数据全在本机 · 开源（AGPL-3.0）
 
-### 📥 [**点这里下载（Windows 免安装，解压双击即用）**](https://github.com/laozhengdang/miaomiao-study/releases/latest)
+### 📥 [**点这里下载（Windows 免安装，解压双击即用）**](https://github.com/laozhengdang/kedaoka/releases/latest)
 
 > 178 MB · 不需要装 Python / Node / 数据库 · 所有依赖都已打包
 > 第一次运行若提示"Windows 已保护你的电脑"，点「更多信息」→「仍要运行」（个人项目没买代码签名，这是正常现象）
@@ -168,8 +168,8 @@ AI 判断"这词要不要留"时偏保守，刷掉的词进「待审」而不是
 
 ### 拿到成品
 
-到 [**Releases**](https://github.com/laozhengdang/miaomiao-study/releases/latest) 下载
-`miaomiao-study-v0.9.7.zip`（178 MB），解压后双击 `老郑荡的妙妙小工具.exe`。
+到 [**Releases**](https://github.com/laozhengdang/kedaoka/releases/latest) 下载
+`kedaoka-v1.0.0.zip`（178 MB），解压后双击 `课到卡.exe`。
 
 **不需要装 Python、不需要装 Node** —— Electron 引擎、Python 3.12、PyMuPDF 全部打包在里面。
 
@@ -207,7 +207,7 @@ npm run web        # 或者起个本地网页版（http://127.0.0.1:5180）
 
 见 [docs/发布清单.md](docs/发布清单.md)。简单说：
 
-1. 把 Electron 发行版放到 `build/老郑荡的妙妙小工具/`
+1. 把 Electron 发行版放到 `build/课到卡/`
 2. 把 Python 嵌入式版解压到 `runtime/python/`，`pip` 装好 `pymupdf`
 3. 双击根目录的 `打包.bat`（内部调 `node tools/pack.mjs`，会校验代码是否真的复制过去了）
 
@@ -216,7 +216,7 @@ npm run web        # 或者起个本地网页版（http://127.0.0.1:5180）
 ## 数据放在哪
 
 ```
-build/老郑荡的妙妙小工具/data/
+build/课到卡/data/
 ├─ db/app.db        ← 卡片、复习记录、设置（含 API Key）
 ├─ images/          ← 从课件里抽出的图
 ├─ source_pdfs/     ← 你导入的原始课件

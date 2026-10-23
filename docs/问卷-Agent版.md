@@ -1,4 +1,4 @@
-# 老郑荡的妙妙小工具 · 使用问卷（Agent 版）
+# 课到卡 · 使用问卷（Agent 版）
 
 > **给谁**：同学电脑上的 AI 编码助手（能执行命令的那种）
 > **任务**：在这台机器上把工具装起来、真的跑一遍、按固定格式交回一份评测报告
@@ -31,10 +31,10 @@
 
 ### 路径 A：下载成品包（推荐，2 分钟）
 
-1. 打开 https://github.com/laozhengdang/miaomiao-study/releases/latest
-2. 下载 `miaomiao-study-v0.9.1.zip`（约 178 MB）
+1. 打开 https://github.com/laozhengdang/kedaoka/releases/latest
+2. 下载 `kedaoka-v0.9.1.zip`（约 178 MB）
 3. 解压到 `C:\Temp\miaomiao-eval\app\`
-4. 记下 `老郑荡的妙妙小工具.exe` 的完整路径
+4. 记下 `课到卡.exe` 的完整路径
 
 **注意**：GitHub 的附件走 `objects.githubusercontent.com`，国内可能连不上。
 连不上就告诉用户「需要换网络下载」，不要去第三方站点找。
@@ -42,8 +42,8 @@
 ### 路径 B：从源码跑
 
 ```bash
-git clone https://github.com/laozhengdang/miaomiao-study.git
-cd miaomiao-study
+git clone https://github.com/laozhengdang/kedaoka.git
+cd kedaoka
 npm install          # Node 22+，国内先设 ELECTRON_MIRROR
 pip install pymupdf  # Python 3.10+
 npm start
@@ -66,7 +66,7 @@ npm start
 | A1 | 用临时数据目录启动程序 | 能打开窗口，不报错 | 窗口标题 |
 | A2 | 首次启动后看左栏课程列表 | **完全为空**（没有预置课程、没有别人的数据） | 可截图 |
 | A3 | 等 2 秒 | 出现三步引导（选专业 → 建课程 → 配 AI） | 可截图 |
-| A4 | 看桌面 | 出现「老郑荡的妙妙小工具」快捷方式 | 文件路径 |
+| A4 | 看桌面 | 出现「课到卡」快捷方式 | 文件路径 |
 | A5 | 关掉程序再打开 | 能正常启动，数据还在 | — |
 
 ### B. 建课与导入
@@ -146,7 +146,7 @@ npm start
 |---|---|---|
 | G1 | 连续切换 5 个页面 | 不白屏、不卡死 |
 | G2 | 快速点按钮 10 次 | 不重复提交、不弹两个弹窗 |
-| G3 | 跑 `老郑荡的妙妙小工具.exe --selfcheck` | 输出「没有发现硬伤」，或列出具体问题 |
+| G3 | 跑 `课到卡.exe --selfcheck` | 输出「没有发现硬伤」，或列出具体问题 |
 | G4 | 跑 `--uitest` | 每步都有结果，出现 `NO_` / `出错` 才算失败 |
 
 ---
@@ -191,7 +191,7 @@ npm start
     "stability": 0
   },
   "results": [
-    { "id": "A1", "status": "pass", "actual": "窗口标题 老郑荡的妙妙小工具", "evidence": "" },
+    { "id": "A1", "status": "pass", "actual": "窗口标题 课到卡", "evidence": "" },
     { "id": "F2", "status": "fail", "actual": "输出 33.33 m/s", "evidence": "shots/f2.png" }
   ],
   "bugs": [

@@ -3,7 +3,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 echo 正在关闭程序...
-taskkill /IM "老郑荡的妙妙小工具.exe" /F >nul 2>nul
+taskkill /IM "课到卡.exe" /F >nul 2>nul
 timeout /t 2 >nul
 
 echo.
@@ -18,6 +18,6 @@ if not "%RC%"=="0" (
 )
 
 echo 启动程序...
-start "" "build\老郑荡的妙妙小工具\老郑荡的妙妙小工具.exe"
+start "" "build\课到卡\课到卡.exe"
 timeout /t 3 >nul
 pause

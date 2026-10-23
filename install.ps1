@@ -3,14 +3,14 @@
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #
 # 如果你只是「想用这个工具」，不要跑这个脚本 ——
-# 直接去下载成品包：https://github.com/laozhengdang/miaomiao-study/releases/latest
+# 直接去下载成品包：https://github.com/laozhengdang/kedaoka/releases/latest
 
 $ErrorActionPreference = 'Stop'
 function Say($m) { Write-Host $m }
 function Bad($m) { Write-Host $m -ForegroundColor Red }
 
 Say '=========================================='
-Say ' 老郑荡的妙妙小工具 · 源码安装'
+Say ' 课到卡 · 源码安装'
 Say '=========================================='
 Say ''
 
