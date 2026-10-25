@@ -210,6 +210,8 @@
           j += 1;
           if (s[j] === '+' || s[j] === '-') j += 1;
           while (j < s.length && isDigit(s[j])) j += 1;
+          // 1e-8.14 这种写法不合法，别悄悄算成 1e-8 * .14
+          if (s[j] === '.') throw new Error('科学计数法的指数必须是整数，比如 1e-8');
         }
         out.push({ t: 'num', v: s.slice(i, j) });
         i = j;
@@ -229,6 +231,7 @@
         i = j;
         continue;
       }
+      if (ch === '*' && s[i + 1] === '*') { out.push({ t: 'op', v: '^' }); i += 2; continue; }
       if ('+-*/^()!,%'.includes(ch)) { out.push({ t: 'op', v: ch }); i += 1; continue; }
       throw new Error(`看不懂的符号：${ch}`);
     }
@@ -422,7 +425,10 @@
       if (eat('^')) {
         const exp = parseUnary();
         if (!sameDims(exp.dims, zeroDims())) throw new Error('指数不能带单位');
-        if (!exp.d.isInteger()) return fromNum(Math.pow(toNum(base.d), toNum(exp.d)));
+        if (!exp.d.isInteger()) {
+          const n = toNum(exp.d);
+          return { d: fromNum(Math.pow(toNum(base.d), n)), dims: base.dims.map((x) => x * n), unit: null };
+        }
         return { d: base.d.pow(exp.d), dims: base.dims.map((x) => x * toNum(exp.d)), unit: null };
       }
       return base;
@@ -486,6 +492,9 @@
       return { ok: false, error: e.message || String(e) };
     }
 
+    if (!value || !value.d || !Array.isArray(value.dims)) {
+      return { ok: false, error: '这个式子我算不了（内部结果不完整）' };
+    }
     let unitText = value.unit || unitLabel(value.dims);
     if (conv) {
       const tgt = parseUnitExpr(conv);
@@ -579,8 +588,9 @@
     else {
       const abs = dec.abs();
       if (dec.isInteger() && abs.lt('1e21')) s = dec.toFixed(0);
-      else if (abs.gte('1e21') || abs.lt('1e-9')) s = dec.toExponential(13).replace(/\.?0+e/, 'e').replace('e+', 'e');
-      else s = dec.toSignificantDigits(14).toString();
+      else if (abs.gte('1e21') || abs.lt('1e-4')) {
+        s = dec.toExponential(13).replace(/\.?0+e/, 'e').replace('e+', 'e');
+      } else s = dec.toSignificantDigits(14).toString();
     }
     return unitText ? `${s} ${unitText}` : s;
   }

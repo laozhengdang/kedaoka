@@ -1,6 +1,6 @@
 {
   "name": "kedaoka",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "课到卡 —— 把课件变成能考的知识卡（兽医课程复习桌面工具）",
   "main": "app/electron/main.mjs",

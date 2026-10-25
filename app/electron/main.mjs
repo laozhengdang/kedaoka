@@ -839,7 +839,7 @@ app.whenReady().then(async () => {
           await wait(400);
           const input = document.querySelector('#calcInput');
           if (!input) return JSON.stringify({ ok: false, err: '没打开' });
-          const cases = ['0.1+0.2', '120 km/h to m/s', '5 mol/L * 2 L', 'sqrt(16)+3!', 'C(10,3)', '30 C to F'];
+          const cases = ['0.1+0.2', '120 km/h to m/s', '5 mol/L * 2 L', 'sqrt(16)+3!', 'C(10,3)', '30 C to F', '10^-8.14', '10**-8.14'];
           const out = [];
           for (const c of cases) {
             input.value = c;
