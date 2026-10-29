@@ -31,7 +31,7 @@ for (const dir of ['app', 'tools']) {
 copyFileSync(join(ROOT, 'package.json'), join(APPDIR, 'package.json'));
 
 // 让同学能一键在桌面建快捷方式：两个文件放到程序根目录（exe 旁边）
-for (const f of ['创建桌面快捷方式.bat', 'make_shortcut.ps1']) {
+for (const f of ['创建桌面快捷方式.bat', '自检.bat', 'make_shortcut.ps1']) {
   const src = f.endsWith('.bat') ? join(ROOT, f) : join(ROOT, 'tools', f);
   if (existsSync(src)) copyFileSync(src, join(OUT, f));
 }
