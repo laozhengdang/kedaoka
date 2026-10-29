@@ -15,6 +15,31 @@ const fail = (s) => { console.error('[×] ' + s); process.exitCode = 1; };
 say('打包检查');
 say('='.repeat(50));
 
+// 打包目录没了就自动从「已安装的完整副本」复制一份（不含 data）
+// 顺序：环境变量 MIAOMIAO_BASE → 桌面\课到卡 → 项目里的旧构建
+if (!existsSync(join(OUT, '课到卡.exe'))) {
+  const homes = [process.env.MIAOMIAO_BASE, join(process.env.USERPROFILE || '', 'Desktop', '课到卡'),
+    join(ROOT, 'build', '老郑荡的妙妙小工具')].filter(Boolean);
+  const base = homes.find((h) => existsSync(join(h, 'resources', 'app')) &&
+    (existsSync(join(h, '课到卡.exe')) || existsSync(join(h, '老郑荡的妙妙小工具.exe'))));
+  if (!base) {
+    fail(`没找到 ${OUT}\\课到卡.exe，也没找到可复制的完整副本（可设 MIAOMIAO_BASE 指向程序目录）`);
+    process.exit(1);
+  }
+  say(`0) 打包目录不存在，从完整副本重建：${base}`);
+  cpSync(base, OUT, {
+    recursive: true,
+    filter: (src) => !/[\\/]data([\\/]|$)/.test(src) && !/[\\/]log([\\/]|$)/.test(src),
+  });
+  const oldExe = join(OUT, '老郑荡的妙妙小工具.exe');
+  if (!existsSync(join(OUT, '课到卡.exe')) && existsSync(oldExe)) {
+    cpSync(oldExe, join(OUT, '课到卡.exe'));
+    rmSync(oldExe, { force: true });
+  }
+  rmSync(join(OUT, 'data'), { recursive: true, force: true });
+  mkdirSync(join(OUT, 'data'), { recursive: true });
+}
+
 if (!existsSync(join(OUT, '课到卡.exe'))) {
   fail(`没找到 ${OUT}\\课到卡.exe（先把 Electron 发行版放进去）`);
   process.exit(1);
